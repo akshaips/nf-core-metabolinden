@@ -32,21 +32,37 @@ if (params.validate_params) {
 /* --     Collect configuration parameters     -- */
 ////////////////////////////////////////////////////
 
-// Check if genome exists in the config file
-if (params.genomes && params.genome && !params.genomes.containsKey(params.genome)) {
-    exit 1, "The provided genome '${params.genome}' is not available in the iGenomes file. Currently the available genomes are ${params.genomes.keySet().join(', ')}"
-}
+Channel.fromPath(params.input)
+.ifEmpty { exit 1, 'params.input was empty - no input files supplied' }
+.set { mzml_input }
 
-// TODO nf-core: Add any reference files that are needed
-// Configurable reference genomes
-//
-// NOTE - THIS IS NOT USED IN THIS PIPELINE, EXAMPLE ONLY
-// If you want to use the channel below in a process, define the following:
-//   input:
-//   file fasta from ch_fasta
-//
-params.fasta = params.genome ? params.genomes[ params.genome ].fasta ?: false : false
-if (params.fasta) { ch_fasta = file(params.fasta, checkIfExists: true) }
+/*
+* Create a channel for centroiding parameters
+*/
+
+Channel.fromPath(params.peak_picker_param)
+.ifEmpty { exit 1, 'params.peak_picker_param was empty - no input files supplied' }
+.set { peak_picker_param }
+
+
+/*
+* Create a channel for recalibration parameters
+*/
+
+Channel.fromPath(params.peak_recalibration_param)
+.ifEmpty { exit 1, 'params.peak_recalibration_param was empty - no input files supplied' }
+.set { peak_recalibration_param }
+
+/*
+* Create a channel for recalibration standards
+*/
+
+Channel.fromPath(params.recalibration_masses)
+.ifEmpty { exit 1, 'params.recalibration_masses was empty - no input files supplied' }
+.set { recalibration_masses }
+
+
+
 
 // Check AWS batch settings
 if (workflow.profile.contains('awsbatch')) {
@@ -60,34 +76,10 @@ if (workflow.profile.contains('awsbatch')) {
 }
 
 // Stage config files
-ch_multiqc_config = file("$projectDir/assets/multiqc_config.yaml", checkIfExists: true)
-ch_multiqc_custom_config = params.multiqc_config ? Channel.fromPath(params.multiqc_config, checkIfExists: true) : Channel.empty()
 ch_output_docs = file("$projectDir/docs/output.md", checkIfExists: true)
 ch_output_docs_images = file("$projectDir/docs/images/", checkIfExists: true)
 
-/*
- * Create a channel for input read files
- */
-if (params.input_paths) {
-    if (params.single_end) {
-        Channel
-            .from(params.input_paths)
-            .map { row -> [ row[0], [ file(row[1][0], checkIfExists: true) ] ] }
-            .ifEmpty { exit 1, 'params.input_paths was empty - no input files supplied' }
-            .into { ch_read_files_fastqc; ch_read_files_trimming }
-    } else {
-        Channel
-            .from(params.input_paths)
-            .map { row -> [ row[0], [ file(row[1][0], checkIfExists: true), file(row[1][1], checkIfExists: true) ] ] }
-            .ifEmpty { exit 1, 'params.input_paths was empty - no input files supplied' }
-            .into { ch_read_files_fastqc; ch_read_files_trimming }
-    }
-} else {
-    Channel
-        .fromFilePairs(params.input, size: params.single_end ? 1 : 2)
-        .ifEmpty { exit 1, "Cannot find any reads matching: ${params.input}\nNB: Path needs to be enclosed in quotes!\nIf this is single-end data, please specify --single_end on the command line." }
-        .into { ch_read_files_fastqc; ch_read_files_trimming }
-}
+
 
 ////////////////////////////////////////////////////
 /* --         PRINT PARAMETER SUMMARY          -- */
@@ -100,8 +92,6 @@ if (workflow.revision) summary['Pipeline Release'] = workflow.revision
 summary['Run Name']         = workflow.runName
 // TODO nf-core: Report custom parameters here
 summary['Input']            = params.input
-summary['Fasta Ref']        = params.fasta
-summary['Data Type']        = params.single_end ? 'Single-End' : 'Paired-End'
 summary['Max Resources']    = "$params.max_memory memory, $params.max_cpus cpus, $params.max_time time per job"
 if (workflow.containerEngine) summary['Container'] = "$workflow.containerEngine - $workflow.container"
 summary['Output dir']       = params.outdir
@@ -122,7 +112,6 @@ summary['Config Files'] = workflow.configFiles.join(', ')
 if (params.email || params.email_on_fail) {
     summary['E-mail Address']    = params.email
     summary['E-mail on failure'] = params.email_on_fail
-    summary['MultiQC maxsize']   = params.max_multiqc_email_size
 }
 
 // Check the hostnames against configured profiles
@@ -163,70 +152,47 @@ process get_software_versions {
     """
     echo $workflow.manifest.version > v_pipeline.txt
     echo $workflow.nextflow.version > v_nextflow.txt
-    fastqc --version > v_fastqc.txt
-    multiqc --version > v_multiqc.txt
+    OpenMSInfo |  grep -oP -m 1 '([0-9][.][0-9][.][0-9])' &> v_openms.txt
     scrape_software_versions.py &> software_versions_mqc.yaml
     """
 }
 
+
+///////////////////////////////////////////////////////////
+/* --         main functions of the workflow          -- */
+//////////////////////////////////////////////////////////
+
 /*
- * STEP 1 - FastQC
+ * Step 1.  Do centroiding if needed
  */
-process fastqc {
-    tag "$name"
-    label 'process_medium'
-    publishDir "${params.outdir}/fastqc", mode: params.publish_dir_mode,
-        saveAs: { filename ->
-                      filename.indexOf('.zip') > 0 ? "zips/$filename" : "$filename"
-        }
+
+if(params.need_centroiding==true){
+  process process_peak_picker_openms  {
+    label 'openms'
+    //label 'process_low'
+    tag "$mzMLFile"
+    publishDir "${params.outdir}/process_peak_picker_pos_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
 
     input:
-    set val(name), file(reads) from ch_read_files_fastqc
+    file mzMLFile from mzml_input
+    each file(setting_file) from peak_picker_param
 
     output:
-    file '*_fastqc.{zip,html}' into ch_fastqc_results
+    set val("$setting_file"), file("output/${mzMLFile}") into recalibration_channel
 
-    script:
     """
-    fastqc --quiet --threads $task.cpus $reads
+    mkdir output
+    PeakPickerHiRes -in $mzMLFile -out output/$mzMLFile -ini $setting_file
     """
-}
+  }
+  }else{
+    recalibration_channel=mzml_input
+  }
+
+
 
 /*
- * STEP 2 - MultiQC
- */
-process multiqc {
-    publishDir "${params.outdir}/MultiQC", mode: params.publish_dir_mode
-
-    input:
-    file (multiqc_config) from ch_multiqc_config
-    file (mqc_custom_config) from ch_multiqc_custom_config.collect().ifEmpty([])
-    // TODO nf-core: Add in log files from your new processes for MultiQC to find!
-    file ('fastqc/*') from ch_fastqc_results.collect().ifEmpty([])
-    file ('software_versions/*') from ch_software_versions_yaml.collect()
-    file workflow_summary from ch_workflow_summary.collectFile(name: "workflow_summary_mqc.yaml")
-
-    output:
-    file "*multiqc_report.html" into ch_multiqc_report
-    file "*_data"
-    file "multiqc_plots"
-
-    script:
-    rtitle = ''
-    rfilename = ''
-    if (!(workflow.runName ==~ /[a-z]+_[a-z]+/)) {
-        rtitle = "--title \"${workflow.runName}\""
-        rfilename = "--filename " + workflow.runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report"
-    }
-    custom_config_file = params.multiqc_config ? "--config $mqc_custom_config" : ''
-    // TODO nf-core: Specify which MultiQC modules to use with -m for a faster run time
-    """
-    multiqc -f $rtitle $rfilename $custom_config_file .
-    """
-}
-
-/*
- * STEP 3 - Output Description HTML
+ * Output Description HTML
  */
 process output_documentation {
     publishDir "${params.outdir}/pipeline_info", mode: params.publish_dir_mode
