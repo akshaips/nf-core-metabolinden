@@ -25,13 +25,13 @@ The pipeline is built using [Nextflow](https://www.nextflow.io), a workflow tool
 3. Download the pipeline and test it on a minimal dataset with a single command (not usable now!):
 
     ```bash
-    nextflow run payamemami/metabolinden -profile test,<docker/singularity/podman/shifter/charliecloud/conda/institute>
+    nextflow run payamemami/nf-core-metabolinden -profile test,<docker/singularity/podman/shifter/charliecloud/conda/institute>
     ```
 
 4. Start running your own analysis!
 
     ```bash
-    nextflow run payamemami/metabolinden -profile <docker/singularity/podman/shifter/charliecloud/conda/institute> --input '*.mzML' --identification_input 'database.tsv' --recalibration_masses 'lock_in_masses.csv'
+    nextflow run payamemami/nf-core-metabolinden -profile <docker/singularity/podman/shifter/charliecloud/conda/institute> --input '*.mzML' --identification_input 'database.tsv' --recalibration_masses 'lock_in_masses.csv'
     ```
 
 See [usage docs](docs/) for all of the available options when running the pipeline.
@@ -54,7 +54,7 @@ The nf-core/metabolinden pipeline comes with documentation about the pipeline: [
 
 ## Credits
 
-payamemami/metabolinden was originally written by Payam Emami.
+payamemami/nf-core-metabolinden was originally written by Payam Emami.
 
 We thank the following people for their extensive assistance in the development
 of this pipeline:
