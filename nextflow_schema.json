@@ -17,7 +17,7 @@
                 "input": {
                     "type": "string",
                     "fa_icon": "fas fa-dna",
-                    "description": "Input mzML files",
+                    "description": "Input mzML files (glob pattern is accepted e.g. *.mzML)",
                     "help_text": "Use this to specify the location of your input FastQ files. For example:\n\n```bash\n--input 'path/to/data/sample_*_{1,2}.fastq'\n```\n\nPlease note the following requirements:\n\n1. The path must be enclosed in quotes\n2. The path must have at least one `*` wildcard character\n3. When using the pipeline with paired end data, the path must use `{1,2}` notation to specify read pairs.\n\nIf left unspecified, a default pattern is used: `data/*{1,2}.fastq.gz`"
                 },
                 "outdir": {
@@ -216,37 +216,129 @@
     ],
     "properties": {
         "need_centroiding": {
-            "type": "string"
+            "type": "boolean",
+            "description": "If set to true, the data will be centroided",
+            "default": true
         },
         "need_recalibration": {
-            "type": "string"
+            "type": "boolean",
+            "description": "If set to true, the data will be recalibrated",
+            "default": true
         },
         "publishDir_intermediate": {
-            "type": "string"
+            "type": "boolean",
+            "description": "If set to true, the data from all the steps will be outputed",
+            "default": true
         },
         "peak_picker_param": {
             "type": "string",
-            "default": "peak_picker.ini"
+            "default": "peak_picker.ini",
+            "description": "If need_centroiding is true, this must be an absolute path to one or a glob pattern to multiple ini files for PeakPickerHiRes tool in OpenMS"
         },
         "feature_finder_param": {
             "type": "string",
-            "default": "feature_finder.ini"
+            "default": "feature_finder.ini",
+            "description": "If need_quantification is true, this must be an absolute path to one or a glob pattern to multiple ini files for FeatureFinderMetabo tool in OpenMS"
         },
         "feature_linker_param": {
             "type": "string",
-            "default": "feature_linker.ini"
+            "default": "feature_linker.ini",
+            "description": "If need_linking is true, this must be an absolute path to one or a glob pattern to multiple ini files for FeatureLinkerUnlabelledQT tool in OpenMS"
         },
         "peak_recalibration_param": {
             "type": "string",
-            "default": "Calibration_settings.ini"
+            "default": "Calibration_settings.ini",
+            "description": "If need_recalibration is true, this must be an absolute path to one or a glob pattern to multiple ini files for InternalCalibration tool in OpenMS"
         },
         "addcut_param": {
             "type": "string",
-            "default": "adducts.ini"
+            "default": "adducts.ini",
+            "description": "If need_adducts is true, this must be an absolute path to one or a glob pattern to multiple ini files for XXX tool in OpenMS"
         },
         "recalibration_masses": {
             "type": "string",
+            "description": "If need_recalibration or need_identification is true, this must be an absolute path to one tab separated file containing the internal standards",
             "default": "lock_masses.csv"
+        },
+        "need_quantification": {
+            "type": "boolean",
+            "default": true,
+            "description": "Set to true if you want to do quantification"
+        },
+        "need_alignment": {
+            "type": "boolean",
+            "description": "Set to true if you want to do alignment",
+            "default": true
+        },
+        "need_linking": {
+            "type": "boolean",
+            "description": "Set to true if you want to do feature linking",
+            "default": true
+        },
+        "need_exporting": {
+            "type": "boolean",
+            "default": true,
+            "description": "Set to true if you want to export the data to tsv format"
+        },
+        "need_adducts": {
+            "type": "boolean",
+            "description": "Set to true if you want to do adduct detection"
+        },
+        "need_identification": {
+            "type": "boolean",
+            "description": "Set to true if you want to do identification"
+        },
+        "feature_alignment_param": {
+            "type": "string",
+            "default": "feature_linker.ini",
+            "description": "if need_alignment is true, this must this must be an absolute path to one or a glob pattern to multiple ini files for MapAlignerPoseClustering tool in OpenMS"
+        },
+        "identification_input": {
+            "type": "string",
+            "default": "tsv",
+            "description": "If need_identification is true, this must be one or multiple TSV files containing at least an m/z column"
+        },
+        "identification_mz_column": {
+            "type": "string",
+            "default": "MZ",
+            "description": "If need_identification is true, this must be the name of the column which has the m/z value in identification_input"
+        },
+        "identification_use_rt": {
+            "type": "boolean",
+            "description": "If set to true, we assume that the identification database (identification_input) has a an RT column"
+        },
+        "identification_convert_rt_to_seconds": {
+            "type": "string",
+            "description": "If set to true, the workflow will convert the retention time from minutes to seconds for the database (identification_input)"
+        },
+        "identification_rt_column": {
+            "type": "string",
+            "default": "RT",
+            "description": "If identification_use_rt is true, this must be the name of the column in the database (identification_input) which has the retention time data"
+        },
+        "identification_max_rt": {
+            "type": "integer",
+            "default": 1,
+            "description": "If identification_use_rt is false, we create fake data to do mapping using OpenMS, this is the maximum retention time for each metabolite"
+        },
+        "identification_min_rt": {
+            "type": "integer",
+            "default": 0,
+            "description": "If identification_use_rt is false, we create fake data to do mapping using OpenMS, this is the minimum retention time for each metabolite"
+        },
+        "identification_scan_time": {
+            "type": "integer",
+            "default": 1,
+            "description": "If identification_use_rt is false, we create fake data to do mapping using OpenMS, this is the scan time for each metabolite"
+        },
+        "internal_database_rt_tolerance": {
+            "type": "integer",
+            "default": 10000000,
+            "description": "retention time tolerance for matching metabolite standard to the dataset (keep very high if you want to do global matching)"
+        },
+        "internal_database_ppm_tolerance": {
+            "type": "integer",
+            "default": 5
         }
     }
 }

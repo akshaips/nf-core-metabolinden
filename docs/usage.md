@@ -13,7 +13,7 @@
 The typical command for running the pipeline is as follows:
 
 ```bash
-nextflow run nf-core/metabolinden --input '*_R{1,2}.fastq.gz' -profile docker
+nextflow run nf-core/metabolinden --input '*.mzML' --identification_input 'database.tsv' --recalibration_masses 'lock_in_masses.csv' -profile docker
 ```
 
 This will launch the pipeline with the `docker` configuration profile. See below for more information about profiles.
@@ -26,6 +26,18 @@ results         # Finished results (configurable, see below)
 .nextflow_log   # Log file from Nextflow
 # Other nextflow hidden files, eg. history of pipeline runs and old logs.
 ```
+
+### Tuning parameters
+
+The pipeline can be used to iteratively run parameters for all the steps.
+To do that, one can simply, replace the parameter file path with a glob pattern.
+For example:
+
+```bash
+nextflow run nf-core/metabolinden --input '*.mzML' --identification_input 'database.tsv' --recalibration_masses 'lock_in_masses.csv' --peak_picker_param 'peak_picker_params/*.ini' -profile docker
+```
+
+In the above code, the pipeline will find all the ini (setting files) for PeakPickerHiRes program in `peak_picker_params` folder and run the centroiding for each of the parameter sets. Similarly, feature detection, alignment, etc and be tested with differet set of parameters.
 
 ### Updating the pipeline
 

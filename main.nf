@@ -1,5 +1,25 @@
 #!/usr/bin/env nextflow
 /*
+nextflow main.nf --input '/Users/payam/wabi_projects/burman/QC_workflow/test_data/raw_data/*.mzML' \
+--need_centroiding false \
+--peak_picker_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/picker_params/*.ini' -profile docker \
+--recalibration_masses /Users/payam/wabi_projects/burman/QC_workflow/test_data/lock_masses.csv \
+--peak_recalibration_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/recal_params/*.ini' \
+--need_recalibration true --publishDir_intermediate true -resume \
+--feature_finder_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/finder_params/*.ini'
+
+
+nextflow main.nf --input '/Users/payam/wabi_projects/burman/QC_workflow/test_data/raw_data/*.mzML' --need_centroiding true --peak_picker_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/picker_params/*.ini' -profile docker --recalibration_masses /Users/payam/wabi_projects/burman/QC_workflow/test_data/lock_masses.csv --peak_recalibration_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/recal_params/*.ini' --need_recalibration false --publishDir_intermediate true -resume --feature_finder_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/finder_params/*.ini'
+
+nextflow main.nf --input '/Users/payam/wabi_projects/burman/QC_workflow/test_data/raw_data/*.mzML' \
+--need_centroiding true --peak_picker_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/picker_params/*.ini' \
+-profile docker --recalibration_masses /Users/payam/wabi_projects/burman/QC_workflow/test_data/lock_masses.csv \
+--peak_recalibration_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/recal_params/*.ini' \
+--need_recalibration true --publishDir_intermediate true -resume \
+--feature_finder_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/finder_params/*.ini' \
+--feature_alignment_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/align_params/*.ini' \
+--feature_linker_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/linker/*.ini' \
+--identification_input '/Users/payam/wabi_projects/burman/QC_workflow/test_data/IDs.tsv'
 ========================================================================================
                          nf-core/metabolinden
 ========================================================================================
@@ -33,36 +53,86 @@ if (params.validate_params) {
 ////////////////////////////////////////////////////
 
 Channel.fromPath(params.input)
-.ifEmpty { exit 1, 'params.input was empty - no input files supplied' }
-.set { mzml_input }
+.ifEmpty { exit 1, 'params.input was empty - no input files supplied' ,checkIfExists: true}
+.map{def key = "start"
+return tuple(key, it)}
+ .into { mzml_input}//.map { tag, files -> tuple( groupKey(tag, files.size()), files ) }
+//.transpose()
 
 /*
 * Create a channel for centroiding parameters
 */
 
+if(params.need_centroiding==true)
+{
 Channel.fromPath(params.peak_picker_param)
-.ifEmpty { exit 1, 'params.peak_picker_param was empty - no input files supplied' }
-.set { peak_picker_param }
-
-
+.ifEmpty { exit 1, 'params.peak_picker_param was empty - no input files supplied' ,checkIfExists: true}
+.into { peak_picker_param }
+}
 /*
 * Create a channel for recalibration parameters
 */
-
-Channel.fromPath(params.peak_recalibration_param)
-.ifEmpty { exit 1, 'params.peak_recalibration_param was empty - no input files supplied' }
-.set { peak_recalibration_param }
+if(params.need_recalibration==true)
+{
+Channel.fromPath(params.peak_recalibration_param,checkIfExists: true)
+.ifEmpty {'params.peak_recalibration_param was empty - no input files supplied!'}
+.into { peak_recalibration_param;c3 }
 
 /*
 * Create a channel for recalibration standards
 */
 
 Channel.fromPath(params.recalibration_masses)
-.ifEmpty { exit 1, 'params.recalibration_masses was empty - no input files supplied' }
-.set { recalibration_masses }
+.ifEmpty { exit 1, 'params.recalibration_masses was empty - no input files supplied' ,checkIfExists: true}
+.into { recalibration_masses;c4 }
+}
 
+/*
+* Create a channel for feature_detection
+*/
 
+if(params.need_quantification==true)
+{
+Channel.fromPath(params.feature_finder_param)
+.ifEmpty { exit 1, 'params.recalibration_masses was empty - no input files supplied' ,checkIfExists: true}
+.set { feature_finder_param }
+}else{
+  params.need_alignment=false
+  params.need_linking=false
+  params.need_identification=false
 
+}
+/*
+* Create a channel for feature aligment parameters
+*/
+if(params.need_alignment==true)
+{
+Channel.fromPath(params.feature_alignment_param)
+.ifEmpty { exit 1, 'params.feature_alignment_param was empty - no input files supplied' ,checkIfExists: true}
+.set { feature_alignment_param }
+}
+
+/*
+* Create a channel for feature linker parameters
+*/
+
+if(params.need_linking==true)
+{
+  Channel.fromPath(params.feature_linker_param)
+.ifEmpty { exit 1, 'params.feature_linker_param was empty - no input files supplied' ,checkIfExists: true}
+.set { feature_linker_param }
+}
+
+/*
+* Create a channel for feature linker parameters
+*/
+
+if(params.need_identification==true)
+{
+  Channel.fromPath(params.identification_input)
+.ifEmpty { exit 1, 'params.identification_input was empty - no input files supplied' ,checkIfExists: true}
+.set { identification_input }
+}
 
 // Check AWS batch settings
 if (workflow.profile.contains('awsbatch')) {
@@ -148,7 +218,6 @@ process get_software_versions {
     file 'software_versions.csv'
 
     script:
-    // TODO nf-core: Get all tools to print their version number here
     """
     echo $workflow.manifest.version > v_pipeline.txt
     echo $workflow.nextflow.version > v_nextflow.txt
@@ -170,25 +239,323 @@ if(params.need_centroiding==true){
   process process_peak_picker_openms  {
     label 'openms'
     //label 'process_low'
-    tag "$mzMLFile"
+    tag "${mzMLFile} using ${setting_file} parameter"
     publishDir "${params.outdir}/process_peak_picker_pos_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
 
     input:
-    file mzMLFile from mzml_input
+    set val(key), file(mzMLFile) from mzml_input
     each file(setting_file) from peak_picker_param
 
     output:
-    set val("$setting_file"), file("output/${mzMLFile}") into recalibration_channel
+    tuple val("${key}_${setting_file.baseName}"), file("output_${key}_${setting_file.baseName}/${mzMLFile}") into recalibration_channel
 
+    script:
     """
-    mkdir output
-    PeakPickerHiRes -in $mzMLFile -out output/$mzMLFile -ini $setting_file
+    mkdir "output_${key}_${setting_file.baseName}"
+    PeakPickerHiRes -in $mzMLFile -out "output_${key}_${setting_file.baseName}/$mzMLFile" -ini $setting_file
     """
   }
+
   }else{
     recalibration_channel=mzml_input
+    log.info "skipping centroiding!"
   }
 
+  /*
+   * Step 2.  Do recalibration if needed
+   */
+
+
+
+  if(params.need_recalibration==true){
+    process process_recalibration_openms  {
+      label 'openms'
+      //label 'process_low'
+      tag "processing ${mzMLFile} using ${setting_file}"
+      publishDir "${params.outdir}/process_recalibration_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+      input:
+      set val(key), file(mzMLFile) from recalibration_channel
+      each file(setting_file) from peak_recalibration_param
+      each file(recal_masses) from recalibration_masses
+
+
+      output:
+      set val("${key}_${setting_file.baseName}"), file("output_${key}_${setting_file.baseName}/${mzMLFile}") into quant_feature_detection
+      set val("${key}_${setting_file.baseName}"), file("output_${key}_${setting_file.baseName}/*.png") into recal_plots
+      set val("${key}_${setting_file.baseName}"), file("output_${key}_${setting_file.baseName}/*.csv") into recal_info
+
+      script:
+      """
+      mkdir "output_${key}_${setting_file.baseName}"
+
+      InternalCalibration -in $mzMLFile -out "output_${key}_${setting_file.baseName}/$mzMLFile" \\
+      -ini $setting_file -cal:lock_in $recal_masses -quality_control:models_plot "output_${key}_${setting_file.baseName}/${mzMLFile.baseName}_models_plot.png" \\
+      -quality_control:residuals_plot "output_${key}_${setting_file.baseName}/${mzMLFile.baseName}_residuals_plot.png" \\
+      -quality_control:residuals "output_${key}_${setting_file.baseName}/${mzMLFile.baseName}_residuals.csv" \\
+      -quality_control:models "output_${key}_${setting_file.baseName}/${mzMLFile.baseName}_models.csv"
+      """
+    }
+    }else{
+      quant_feature_detection=recalibration_channel
+    }
+
+
+    /*
+     * Step 3.  Do quantification if needed
+     */
+
+    if(params.need_quantification==true){
+      process process_masstrace_detection_openms  {
+        label 'openms'
+        //label 'process_low'
+        tag "processing ${mzMLFile} using ${setting_file}"
+        publishDir "${params.outdir}/process_masstrace_detection_pos_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+        input:
+        set val(key), file(mzMLFile) from quant_feature_detection
+        each file(setting_file) from feature_finder_param
+
+        output:
+        set val("${key}_${setting_file.baseName}"), file("output_${key}_${setting_file.baseName}/${mzMLFile}.featureXML") into quant_feature_alignment_tmp
+
+        script:
+        """
+        mkdir "output_${key}_${setting_file.baseName}"
+        FeatureFinderMetabo -in $mzMLFile -out "output_${key}_${setting_file.baseName}/${mzMLFile}.featureXML" -ini $setting_file
+        """
+      }
+      }else{
+        quant_feature_alignment_tmp=quant_feature_detection
+      }
+
+      /*
+       * Step 4.  Do alignment if needed
+       */
+
+       quant_feature_alignment_tmp
+       .groupTuple().into{alignment_input}
+
+
+if(params.need_alignment==true)
+{
+  process process_masstrace_alignment_openms  {
+    label 'openms'
+    //label 'process_low'
+    tag "$key"
+    publishDir "${params.outdir}/process_masstrace_alignment_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+    input:
+    set val(key), file(mzMLFile) from alignment_input
+    each file(setting_file) from feature_alignment_param
+
+    output:
+    set val("${key}_${setting_file.baseName}"), file("output_${key}_${setting_file.baseName}/*.*") into feature_linker_input_tmp
+
+    script:
+    def inputs_aggregated = mzMLFile.collect{ "$it" }.join(" ")
+    def output_aggregated = mzMLFile.collect{ "\"output_${key}_${setting_file.baseName}/$it\"" }.join(" ")
+    """
+    mkdir "output_${key}_${setting_file.baseName}"
+    MapAlignerPoseClustering -in $inputs_aggregated -out $output_aggregated -ini $setting_file
+    """
+  }
+}else{
+
+  feature_linker_input_tmp=alignment_input
+}
+
+
+/*
+ * Step 5.  Do linking if needed
+ */
+feature_linker_input_tmp.into{feature_linker_input}
+
+
+if(params.need_linking==true)
+{
+  process process_masstrace_linker_openms  {
+    label 'openms'
+    //label 'process_low'
+    tag "$setting_file"
+    publishDir "${params.outdir}/process_masstrace_linker_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+    input:
+    set val(key), file(mzMLFile) from feature_linker_input
+    each file(setting_file) from feature_linker_param
+
+    output:
+    set val("${key}_${setting_file.baseName}"), file("output_${key}_${setting_file.baseName}/*.*") into feature_identification_input
+
+    script:
+    def inputs_aggregated = mzMLFile.collect{ "$it" }.join(" ")
+    """
+    mkdir "output_${key}_${setting_file.baseName}"
+    FeatureLinkerUnlabeledQT -in $inputs_aggregated -out "output_${key}_${setting_file.baseName}/linked_features.consensusXML" -ini $setting_file
+    """
+  }
+}else{
+
+  feature_identification_input=feature_linker_input
+}
+
+/*
+ * Step 5.  Do identification if needed
+ */
+if(params.need_identification==true)
+{
+process convert_library_to_idXML  {
+  label 'openms'
+  //label 'process_low'
+  tag "$libfile"
+  publishDir "${params.outdir}/convert_library_to_idXML", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+  echo true
+  input:
+  file libfile from identification_input
+
+
+  output:
+  file "${libfile.baseName}/${libfile.baseName}.idXML" into libsearch_database
+
+  """
+  #!/usr/bin/env python3.9
+
+  import pyopenms as py
+  import csv
+  import re
+  import numpy as np
+  import os
+  import xml.etree.ElementTree as ET
+  from pathlib import Path
+
+
+  os.mkdir("${libfile.baseName}")
+  inputs=list(filter((lambda x: re.search(r'tsv\$', x)), os.listdir()))
+  if len(inputs)>1:
+    sys.exit('Expect one tsv file')
+
+  inputs="${libfile}"
+  file_stem=Path(inputs).stem
+
+  header=[]
+  line_nr=0
+  use_rt="$params.identification_use_rt"=="true"
+  convert_to_seconds="$params.identification_convert_rt_to_seconds"=="true"
+
+  fm=[]
+  pm=[]
+  id_trace=1
+  with open(inputs) as tsvfile:
+      tsvreader = csv.reader(tsvfile, delimiter="\t")
+      for line in tsvreader:
+          if line_nr==0:
+            header=line
+            all_mzs=[i for i, x in enumerate(header) if "$params.identification_mz_column" in x]
+            all_rt=[i for i, x in enumerate(header) if "$params.identification_rt_column" in x]
+            if(use_rt==True):
+              rest=[i for i, x in enumerate(header) if "$params.identification_rt_column" not in x and "$params.identification_mz_column" not in x]
+              rt_range=[0]
+            else:
+              rest=[i for i, x in enumerate(header) if "$params.identification_mz_column" not in x]
+              rt_range=np.arange ($params.identification_min_rt, $params.identification_max_rt, $params.identification_scan_time)
+              all_rt=[i for i, x in enumerate(header) if "$params.identification_rt_column" in x]
+              #all_mzs=np.repeat(all_mzs,len(rt_range))
+              convert_to_seconds=False
+          else:
+            mz=np.float(line[all_mzs[0]])
+            rt_ex=np.float(line[all_rt[0]])
+            for i in range(0,len(rt_range)):
+              if(use_rt==False):
+                rt_ex=np.float(rt_range[i])
+              if(convert_to_seconds==True):
+                rt_ex=rt_ex*60
+              pid= py.PeptideIdentification()
+              pid.setMZ(mz)
+              pid.setRT(rt_ex);
+              pid.setIdentifier(header[all_mzs[0]]+"_"+header[all_rt[0]]+"_"+str(mz)+"_"+str(rt_ex))
+              #pid.setMetaValue("mz_adduct",header[all_mzs[i]])
+              #pid.setMetaValue("cc_adduct",header[all_ccs[i]])
+              #pid.setMetaValue("mz_adduct_value",line[all_mzs[i]])
+              #pid.setMetaValue("cc_adduct_value",line[all_ccs[i]])
+              pid.setIdentifier(str(id_trace))
+              hit=py.PeptideHit()
+              hit.setSequence(py.AASequence.fromString("METABOLITE"))
+              phit=py.ProteinHit()
+              phit.setAccession(str(id_trace))
+              pe=py.PeptideEvidence()
+              pe.setProteinAccession(str(id_trace));
+              hit.addPeptideEvidence(pe)
+              pid.insertHit(hit)
+
+              pid.setHits([hit])
+              ppp=py.ProteinIdentification()
+              ppp.insertHit(phit)
+              ppp.setIdentifier(str(id_trace))
+              id_trace=id_trace+1
+              for j in range(0,len(rest)):
+                pid.setMetaValue(header[rest[j]],line[rest[j]])
+              fm.append(pid)
+              pm.append(ppp)
+          line_nr=line_nr+1
+
+  f=py.IdXMLFile()
+  f.store("${libfile.baseName}/"+file_stem+".idXML",pm,fm)
+
+
+  """
+}
+
+
+process process_masstrace_matchlib_openms  {
+  label 'openms'
+  //label 'process_low'
+  tag "$input"
+  publishDir "${params.outdir}/process_masstrace_matchlib_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+  input:
+  set val(key), file(input) from feature_identification_input
+  each file(idfile) from libsearch_database
+
+
+  output:
+  set val("${key}_${idfile.baseName}"), file("output_${key}_${idfile.baseName}/$input") into qc_input
+
+  """
+  mkdir "output_${key}_${idfile.baseName}"
+  IDMapper -in $input -id $idfile -out "output_${key}_${idfile.baseName}/$input" -mz_reference 'precursor' \\
+  -mz_measure 'ppm' -rt_tolerance $params.internal_database_rt_tolerance -mz_tolerance $params.internal_database_ppm_tolerance
+  """
+}
+
+
+}else{
+
+qc_input=feature_identification_input
+}
+
+/*
+ * Step 6.  Export the data
+ */
+ if(params.need_exporting==true)
+ {
+   process process_feature_exporter_openms  {
+     label 'openms'
+     //label 'process_low'
+     tag "$consensusXML - $key"
+     publishDir "${params.outdir}/process_feature_exporter_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+     input:
+     set val(key), file(consensusXML) from qc_input
+
+     output:
+     set val(key), file("output_${key}/${consensusXML.baseName}.tsv") into sum_calc, test6
+
+     """
+     mkdir "output_${key}"
+     TextExporter -in $consensusXML -out "output_${key}/${consensusXML.baseName}.tsv" -feature:add_metavalues 0 -id:add_metavalues 0
+     """
+   }
+ }
 
 
 /*
