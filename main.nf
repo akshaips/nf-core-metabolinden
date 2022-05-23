@@ -548,11 +548,95 @@ qc_input=feature_identification_input
      set val(key), file(consensusXML) from qc_input
 
      output:
-     set val(key), file("output_${key}/${consensusXML.baseName}.tsv") into sum_calc, test6
+     set val(key), file("output_${key}/${consensusXML.baseName}.tsv") into output_formatting
 
      """
      mkdir "output_${key}"
      TextExporter -in $consensusXML -out "output_${key}/${consensusXML.baseName}.tsv" -feature:add_metavalues 0 -id:add_metavalues 0
+     """
+   }
+
+   process process_feature_output_formatting_openms  {
+     label 'openms'
+     //label 'process_low'
+     tag "$consensusXML - $key"
+     publishDir "${params.outdir}/process_feature_output_formatting_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+     input:
+     set val(key), file(consensusXML) from output_formatting
+
+     output:
+     set val(key), file("output_${key}/*.tsv") into sum_calc, test6
+
+     """
+     #!/usr/bin/env Rscript
+
+     dir.create("output_${key}")
+     filepath<-"$consensusXML"
+
+    output_file_feature <- "output_${key}/${consensusXML.baseName}_quantification.tsv"
+    output_file_id <- "output_${key}/${consensusXML.baseName}_identification.tsv"
+    # Open the connection
+    con = file(filepath, "r")
+
+    # read line by line until the feature headers
+    # consensus header
+
+    consensus_header <- NA
+    id_header <- NA
+    line = readLines(con, n = 1)
+    con_pre <- FALSE
+    f_line_nr <- 0
+
+    while ( TRUE ) {
+      line = readLines(con, n = 1)
+
+      if ( length(line) == 0 ) {
+        break
+      }
+      #data[max(grep(data,pattern = "#CONSENSUS",fixed = T))]
+      line_split<-strsplit(line,split = "\t")[[1]]
+      if(line_split[1]=="#CONSENSUS")
+      {
+        consensus_header <- c("Met_ID",line_split)
+      }
+
+
+      if(line_split[1]=="#PEPTIDE")
+      {
+        id_header <- c("Met_ID",line_split)
+
+      }
+
+
+      if(line_split[1]=="MAP")
+      {
+        map_id<-line_split[2]
+        map_name <- basename(line_split[3])
+        consensus_header<-gsub(pattern = paste("_",map_id,"\$",sep = ""),replacement = paste("_",map_name,sep=""),x = consensus_header)
+      }
+
+
+
+      if(line_split[1]=="CONSENSUS")
+      {
+        f_line_nr <- f_line_nr + 1
+        if(f_line_nr==1)
+        {
+          write(paste(c(consensus_header),collapse  = "\t"),file = output_file_feature,append = TRUE)
+          write(paste(c(id_header),collapse  = "\t"),file = output_file_id,append = TRUE)
+        }
+
+        write(paste(c(f_line_nr,line_split),collapse  = "\t"),file = output_file_feature,append = TRUE)
+      }
+
+      if(line_split[1]=="PEPTIDE")
+      {
+        write(paste(c(f_line_nr,line_split),collapse  = "\t"),file = output_file_id,append = TRUE)
+      }
+
+    }
+
      """
    }
  }
