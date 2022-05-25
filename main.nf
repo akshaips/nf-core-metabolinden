@@ -36,7 +36,7 @@ log.info Headers.nf_core(workflow, params.monochrome_logs)
 ////////////////////////////////////////////////////+
 def json_schema = "$projectDir/nextflow_schema.json"
 if (params.help) {
-    def command = "nextflow run nf-core/metabolinden --input '*_R{1,2}.fastq.gz' -profile docker"
+    def command = "nextflow run nf-core/metabolinden --input '*.mzML' -profile docker"
     log.info NfcoreSchema.params_help(workflow, params, json_schema, command)
     exit 0
 }
@@ -52,11 +52,10 @@ if (params.validate_params) {
 /* --     Collect configuration parameters     -- */
 ////////////////////////////////////////////////////
 
-Channel.fromPath(params.input)
-.ifEmpty { exit 1, 'params.input was empty - no input files supplied' ,checkIfExists: true}
+Channel.fromPath(params.input,checkIfExists: true)
 .map{def key = "start"
 return tuple(key, it)}
- .into { mzml_input}//.map { tag, files -> tuple( groupKey(tag, files.size()), files ) }
+ .set { mzml_input}//.map { tag, files -> tuple( groupKey(tag, files.size()), files ) }
 //.transpose()
 
 /*
@@ -65,9 +64,8 @@ return tuple(key, it)}
 
 if(params.need_centroiding==true)
 {
-Channel.fromPath(params.peak_picker_param)
-.ifEmpty { exit 1, 'params.peak_picker_param was empty - no input files supplied' ,checkIfExists: true}
-.into { peak_picker_param }
+Channel.fromPath(params.peak_picker_param,checkIfExists: true)
+.set { peak_picker_param }
 }
 /*
 * Create a channel for recalibration parameters
@@ -75,15 +73,13 @@ Channel.fromPath(params.peak_picker_param)
 if(params.need_recalibration==true)
 {
 Channel.fromPath(params.peak_recalibration_param,checkIfExists: true)
-.ifEmpty {'params.peak_recalibration_param was empty - no input files supplied!'}
 .into { peak_recalibration_param;c3 }
 
 /*
 * Create a channel for recalibration standards
 */
 
-Channel.fromPath(params.recalibration_masses)
-.ifEmpty { exit 1, 'params.recalibration_masses was empty - no input files supplied' ,checkIfExists: true}
+Channel.fromPath(params.recalibration_masses,checkIfExists: true)
 .into { recalibration_masses;c4 }
 }
 
@@ -93,8 +89,7 @@ Channel.fromPath(params.recalibration_masses)
 
 if(params.need_quantification==true)
 {
-Channel.fromPath(params.feature_finder_param)
-.ifEmpty { exit 1, 'params.recalibration_masses was empty - no input files supplied' ,checkIfExists: true}
+Channel.fromPath(params.feature_finder_param,checkIfExists: true)
 .set { feature_finder_param }
 }else{
   params.need_alignment=false
@@ -107,8 +102,7 @@ Channel.fromPath(params.feature_finder_param)
 */
 if(params.need_alignment==true)
 {
-Channel.fromPath(params.feature_alignment_param)
-.ifEmpty { exit 1, 'params.feature_alignment_param was empty - no input files supplied' ,checkIfExists: true}
+Channel.fromPath(params.feature_alignment_param,checkIfExists: true)
 .set { feature_alignment_param }
 }
 
@@ -118,8 +112,7 @@ Channel.fromPath(params.feature_alignment_param)
 
 if(params.need_linking==true)
 {
-  Channel.fromPath(params.feature_linker_param)
-.ifEmpty { exit 1, 'params.feature_linker_param was empty - no input files supplied' ,checkIfExists: true}
+  Channel.fromPath(params.feature_linker_param,checkIfExists: true)
 .set { feature_linker_param }
 }
 
@@ -129,8 +122,7 @@ if(params.need_linking==true)
 
 if(params.need_identification==true)
 {
-  Channel.fromPath(params.identification_input)
-.ifEmpty { exit 1, 'params.identification_input was empty - no input files supplied' ,checkIfExists: true}
+  Channel.fromPath(params.identification_input,checkIfExists: true)
 .set { identification_input }
 }
 
@@ -334,7 +326,7 @@ if(params.need_centroiding==true){
        */
 
        quant_feature_alignment_tmp
-       .groupTuple().into{alignment_input}
+       .groupTuple().set{alignment_input}
 
 
 if(params.need_alignment==true)
@@ -369,7 +361,7 @@ if(params.need_alignment==true)
 /*
  * Step 5.  Do linking if needed
  */
-feature_linker_input_tmp.into{feature_linker_input}
+feature_linker_input_tmp.set{feature_linker_input}
 
 
 if(params.need_linking==true)
@@ -696,18 +688,7 @@ workflow.onComplete {
 
     // TODO nf-core: If not using MultiQC, strip out this code (including params.max_multiqc_email_size)
     // On success try attach the multiqc report
-    def mqc_report = null
-    try {
-        if (workflow.success) {
-            mqc_report = ch_multiqc_report.getVal()
-            if (mqc_report.getClass() == ArrayList) {
-                log.warn "[nf-core/metabolinden] Found multiple reports from process 'multiqc', will use only one"
-                mqc_report = mqc_report[0]
-            }
-        }
-    } catch (all) {
-        log.warn "[nf-core/metabolinden] Could not attach MultiQC report to summary email"
-    }
+
 
     // Check if we are only sending emails on failure
     email_address = params.email
@@ -727,7 +708,7 @@ workflow.onComplete {
     def email_html = html_template.toString()
 
     // Render the sendmail template
-    def smail_fields = [ email: email_address, subject: subject, email_txt: email_txt, email_html: email_html, projectDir: "$projectDir", mqcFile: mqc_report, mqcMaxSize: params.max_multiqc_email_size.toBytes() ]
+    def smail_fields = [ email: email_address, subject: subject, email_txt: email_txt, email_html: email_html, projectDir: "$projectDir", mqcFile: null, mqcMaxSize: 1 ]
     def sf = new File("$projectDir/assets/sendmail_template.txt")
     def sendmail_template = engine.createTemplate(sf).make(smail_fields)
     def sendmail_html = sendmail_template.toString()
@@ -742,9 +723,6 @@ workflow.onComplete {
         } catch (all) {
             // Catch failures and try with plaintext
             def mail_cmd = [ 'mail', '-s', subject, '--content-type=text/html', email_address ]
-            if ( mqc_report.size() <= params.max_multiqc_email_size.toBytes() ) {
-              mail_cmd += [ '-A', mqc_report ]
-            }
             mail_cmd.execute() << email_html
             log.info "[nf-core/metabolinden] Sent summary e-mail to $email_address (mail)"
         }
