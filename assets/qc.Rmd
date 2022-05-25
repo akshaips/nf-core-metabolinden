@@ -1,0 +1,554 @@
+---
+title: "QC report"
+output: html_document
+params:
+  input_abundance: 
+  input_id: 
+  input_exp_design: 
+  input_internal_standards: 
+  id_name:
+  id_mz: 
+  id_rt: 
+  id_check_rt: 
+  id_convert_rt_to_seconds: 
+  id_use_rt: 
+  color_by:
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(plotly)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,echo=FALSE}
+data_abundance <- read.table(file = params$input_abundance,header = TRUE,sep = "\t",comment.char = "",stringsAsFactors = FALSE)
+colnames(data_abundance) <- gsub("\\.mzML$",replacement = "",colnames(data_abundance))
+data_abundance[is.na(data_abundance)]<-NA
+
+data_exp_design <- read.table(file = params$input_exp_design,header = TRUE,sep = "\t",comment.char = "",stringsAsFactors = FALSE)
+if(!is.null(params$input_internal_standards))
+internal_standards <- read.table(file = params$input_internal_standards,header = TRUE,sep = "\t",comment.char = "",stringsAsFactors = FALSE)
+
+if(!is.null(params$input_id))
+data_identification <- read.table(file = params$input_id,header = TRUE,sep = "\t",comment.char = "",stringsAsFactors = FALSE)
+
+
+print_qc_standards <- !is.null(params$input_internal_standards) & nrow(internal_standards)>1 & !is.null(params$input_id)
+
+if(!all(c("file_name","runorder")%in%colnames(data_exp_design)))
+  stop("The experimental design file must at least contain file_name and runorder!")
+
+
+data_exp_design <- data_exp_design[order(data_exp_design[,"runorder"]),]
+
+column_names_cmp <- lapply(c("rt","intensity","charge","width","mz"),function(x){paste(x,data_exp_design[,"file_name"],sep="_")})
+names(column_names_cmp)<-c("rt","intensity","charge","width","mz")
+
+if(!all(sapply(column_names_cmp,function(x){all(x%in%colnames(data_abundance))})))
+{
+  incor_names<-gsub(pattern = "^rt_|^intensity_|^charge_|^width_|^mz_",
+       unlist(sapply(column_names_cmp,function(x){x[!x%in%colnames(data_abundance)]})),replacement = "")
+  stop("The file names in the experimental design file must match the raw data (this is case sensitive)! The names must not contain the file extension!"," check:", paste(unique(incor_names),collapse =" "))
+}
+
+
+
+if(length(column_names_cmp)>10){
+  show_text<-element_text(angle = 90)
+}else{
+   show_text=element_blank()
+}
+```
+
+
+## Global QC
+
+### Missing values
+
+Percentage of missing values compared to the total number of features find in the *entire* dataset
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
+
+missing_data<-apply(is.na(data_abundance[,column_names_cmp[["intensity"]]]),
+      2,sum)/nrow(data_abundance)
+missing_data<-missing_data*100
+plot_missing_data<-data.frame(data_exp_design,missing_data=missing_data)
+
+plot_missing_data[,"file_name"]<-factor(plot_missing_data[,"file_name"],levels = plot_missing_data[,"file_name"])
+
+plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="missing_data",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="missing_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Missing value percentage")+theme(axis.text.x = show_text)+ylim(0,100))
+
+```
+
+### TIC across the run order
+
+This plots shows the $log_2$ of TIC over the runorder
+
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
+
+tic_data<-apply((data_abundance[,column_names_cmp[["intensity"]]]),
+      2,sum,na.rm=TRUE)
+tic_data<-log2(missing_data)
+plot_missing_data<-data.frame(data_exp_design,tic_data=tic_data)
+
+plot_missing_data[,"file_name"]<-factor(plot_missing_data[,"file_name"],levels = plot_missing_data[,"file_name"])
+
+plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="tic_data",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="tic_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Log2 of TIC")+theme(axis.text.x = show_text))
+
+```
+
+### CV across the run order
+
+This plots shows the CV over the runorder. The dashed line shows the median of CV.
+
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
+
+   CV<-function(x)
+        {
+		if(length(na.omit(x))<=2)return(NA)
+          sd(x,na.rm = T)/mean(x,na.rm = T)
+   }
+
+hist_data<-data.frame(x=apply((data_abundance[,column_names_cmp[["intensity"]]]),
+      1,CV))
+
+
+plotly::ggplotly(ggplot(data = hist_data,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue")+
+   geom_vline(aes(xintercept=median(hist_data$x,na.rm = T)),
+            color="blue", linetype="dashed", size=1) +theme_classic()+xlab("CV"))
+
+```
+
+
+### mz and retention time deviance
+
+#### RT
+This plots retention time deviation compared to the median retention time for each feature
+
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
+
+
+
+rt_median<-apply((data_abundance[,column_names_cmp[["rt"]]]),
+      1,median,na.rm=TRUE)
+
+
+
+
+rt_dev<-sweep(as.matrix(data_abundance[,column_names_cmp[["rt"]]]), 1, rt_median)
+
+dt_fr<-data.frame(data_abundance[,column_names_cmp[["rt"]]],dev=rt_dev[,2])
+
+dt_fr<-reshape2::melt(dt_fr,measure.vars=c(column_names_cmp[["rt"]]))
+
+colnames(dt_fr)[colnames(dt_fr)=="variable"]<-"file_name"
+levels(dt_fr[,"file_name"])<-gsub("^rt_",replacement = "",levels(dt_fr[,"file_name"]))
+dt_fr<-merge.data.frame(dt_fr,data_exp_design,by="file_name")
+
+
+
+plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)
+  +theme_classic()+xlab("m/z")+ylab("Deviation"))
+
+
+```
+
+This is showing the distribution of RT deviation
+
+
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
+
+
+
+rt_median<-apply((data_abundance[,column_names_cmp[["rt"]]]),
+      1,median,na.rm=TRUE)
+
+rt_dev<-sweep(as.matrix(data_abundance[,column_names_cmp[["rt"]]]), 1, rt_median)
+
+rt_hist<-data.frame(x=as.vector(rt_dev))
+
+plotly::ggplotly(ggplot(data = rt_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("RT"))
+```
+
+#### mz
+
+
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
+
+
+
+mz_median<-apply((data_abundance[,column_names_cmp[["mz"]]]),
+      1,median,na.rm=TRUE)
+
+mz_dev<-sweep(as.matrix(data_abundance[,column_names_cmp[["mz"]]]), 1, mz_median)
+mz_dev<-sweep(mz_dev, MARGIN = 1,FUN = "/", mz_median)*1000000
+  
+
+dt_fr<-data.frame(data_abundance[,column_names_cmp[["mz"]]],dev=mz_dev[,2])
+
+dt_fr<-reshape2::melt(dt_fr,measure.vars=c(column_names_cmp[["mz"]]))
+
+colnames(dt_fr)[colnames(dt_fr)=="variable"]<-"file_name"
+levels(dt_fr[,"file_name"])<-gsub("^mz_",replacement = "",levels(dt_fr[,"file_name"]))
+dt_fr<-merge.data.frame(dt_fr,data_exp_design,by="file_name")
+
+
+plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)
+  +theme_classic()+xlab("m/z")+ylab("Deviation (ppm)"))
+
+
+```
+
+This is showing the distribution of RT deviation
+
+
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
+
+
+mz_hist<-data.frame(x=as.vector(mz_dev))
+
+plotly::ggplotly(ggplot(data = mz_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("Deviation (ppm)"))
+```
+
+
+### Charge state across different runs
+
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
+
+charge_data<-apply(data_abundance[,column_names_cmp[["charge"]]],2,function(x){(table(x)/length(x))*100})
+
+all_charges<-sort(unique(unlist(sapply(charge_data,names))))
+all_charges_U<-sort(unique(unlist(sapply(charge_data,names))))
+all_charges<-data.frame(sample=column_names_cmp[["charge"]],
+                        charge=rep(all_charges,each=length(column_names_cmp[["charge"]])),count_qc=NA,
+                        do.call(rbind, replicate(length(column_names_cmp[["charge"]]), data_exp_design, simplify=FALSE)))
+
+
+
+
+for(x in names(charge_data))
+{
+  fk_dt<-rep(NA,length(all_charges_U))
+  names(fk_dt)<-all_charges_U
+  fk_dt[names(charge_data[[x]])]<-charge_data[[x]]
+  all_charges[all_charges$sample==x,"count_qc"]<-fk_dt
+}
+
+
+all_charges$sample<-factor(all_charges$sample,levels = column_names_cmp[["charge"]])
+
+levels(all_charges$sample)<-gsub("charge_",all_charges$sample,replacement = "")
+
+plotly::ggplotly(ggplot(data=all_charges, aes_string(x="sample", y="count_qc",color=params$color_by)) +  geom_point()+
+     geom_smooth(aes_string(x="sample",y="count_qc",group="charge"),se = FALSE)+
+facet_wrap(~charge,scales = "free")+
+  theme_classic()+xlab("")+ylab("Percentage of charge")+theme(axis.text.x = show_text))
+
+
+```
+
+### Consistent charge
+
+This plot shows the percentage of features that have consistent charge state across the runs
+
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
+
+charge_data<-apply(data_abundance[,column_names_cmp[["charge"]]],1,function(x){(table(x)/length(x))*100})
+
+
+all_charges<-sort(unique(unlist(sapply(charge_data,function(x){names(x[x==100])}))))
+
+all_charges<-reshape2::melt(table(unlist(sapply(charge_data,function(x){names(x[x==100])})))*100/nrow(data_abundance))
+
+plotly::ggplotly(ggplot(data=all_charges, aes(x="charge", y=value,fill=as.character(Var1))) +  geom_bar(stat = "identity",position="stack")+
+  theme_classic()+xlab("")+ylab("Percentage of charge")+theme(legend.title=element_blank())+ylim(0,100))
+
+
+
+
+```
+
+
+```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE,include=print_qc_standards,eval=print_qc_standards}
+
+ knitr::asis_output("## Internal standard-based QC
+ 
+                    ### Identification
+                    ")
+# what has been identified!
+unique_ids_database<-NA
+unique_ids_exp <- NA
+if(params$id_use_rt)
+{
+  unique_ids_database<-unique(apply(internal_standards[,c(params$id_mz,params$id_rt)],1,function(x){paste(x,collapse = "_")}))
+  unique_ids_exp<-unique(apply(data_identification[,c("mz",params$id_rt)],1,function(x){paste(x,collapse = "_")}))
+  ids_exp<-apply(data_identification[,c("mz",params$id_rt)],1,function(x){paste(x,collapse = "_")})
+}else{
+  
+    unique_ids_database<-unique(as.character(internal_standards[,c(params$id_mz)]))
+  unique_ids_exp<-unique(as.character(data_identification[,"mz"]))
+    ids_exp<-as.character(data_identification[,"mz"])
+
+}
+
+ knitr::asis_output( paste( "The total number of identified metabolites is ",length(intersect(unique_ids_database,unique_ids_exp)), " out of ",length(unique_ids_database),". In addition, ",length(unique(data_identification[duplicated(data_identification[,"Met_ID"]),"Met_ID"]))," metabolites were not assigned to a unique feature.
+Finally, ", length(unique(ids_exp[duplicated(ids_exp)]))," metabolites were assigned to multiple features.")) 
+ 
+
+knitr::asis_output("### QC based on Identification")
+
+## limit the data to the identified one!
+
+data_abundance<-data_abundance[data_abundance[,"Met_ID"]%in%data_identification[,"Met_ID"],,drop=FALSE]
+
+knitr::asis_output("### Missing values")
+knitr::asis_output("Percentage of missing values compared to the total number of features find in the *entire* dataset")
+
+missing_data<-apply(is.na(data_abundance[,column_names_cmp[["intensity"]]]),
+      2,sum)/nrow(data_abundance)
+missing_data<-missing_data*100
+plot_missing_data<-data.frame(data_exp_design,missing_data=missing_data)
+
+plot_missing_data[,"file_name"]<-factor(plot_missing_data[,"file_name"],levels = plot_missing_data[,"file_name"])
+
+plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="missing_data",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="missing_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Missing value percentage")+theme(axis.text.x = show_text)+ylim(0,100))
+
+###
+knitr::asis_output(
+"### TIC across the run order
+
+This plots shows the $log_2$ of TIC over the runorder")
+
+tic_data<-apply((data_abundance[,column_names_cmp[["intensity"]]]),
+      2,sum,na.rm=TRUE)
+tic_data<-log2(missing_data)
+plot_missing_data<-data.frame(data_exp_design,tic_data=tic_data)
+
+plot_missing_data[,"file_name"]<-factor(plot_missing_data[,"file_name"],levels = plot_missing_data[,"file_name"])
+
+plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="tic_data",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="tic_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Log2 of TIC")+theme(axis.text.x = show_text))
+
+knitr::asis_output("
+### CV across the run order
+
+This plots shows the CV over the runorder. The dashed line shows the median of CV."
+)
+
+
+   CV<-function(x)
+        {
+		if(length(na.omit(x))<=2)return(NA)
+          sd(x,na.rm = T)/mean(x,na.rm = T)
+   }
+
+hist_data<-data.frame(x=apply((data_abundance[,column_names_cmp[["intensity"]]]),
+      1,CV))
+
+
+plotly::ggplotly(ggplot(data = hist_data,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue")+
+   geom_vline(aes(xintercept=median(hist_data$x,na.rm = T)),
+            color="blue", linetype="dashed", size=1) +theme_classic()+xlab("CV"))
+
+knitr::asis_output("
+### CV individual standars
+
+This plots shows the CV over the runorder for each ID"
+)
+
+for(i in 1:nrow(hist_data))
+{
+    data_points<-data_abundance[i,column_names_cmp[["intensity"]]]
+    met_id<-data_abundance[i,"Met_ID"]
+    metabo_names <- paste("ID: ",met_id, " Name(s): ",
+                          paste(data_identification[data_identification[,"Met_ID"]==met_id,params$id_name],sep="/"),
+                          "CV: ",hist_data[i,"x"])
+plot_point_data<-data.frame(data_exp_design,points=log2(as.numeric(data_points)))
+
+plot_point_data[,"file_name"]<-factor(plot_point_data[,"file_name"],levels = plot_point_data[,"file_name"])
+
+(plotly::ggplotly(ggplot(data = plot_point_data,aes_string(x="file_name",
+                                                          y="points",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="points",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Log2 intensity")+
+    theme(axis.text.x = show_text)+ggtitle(metabo_names)))
+
+}
+
+knitr::asis_output("
+### mz and retention time deviance
+
+#### RT
+
+This plots retention time deviation compared to the median retention time for each feature
+"
+)
+
+rt_median<-apply((data_abundance[,column_names_cmp[["rt"]]]),
+      1,median,na.rm=TRUE)
+
+rt_dev<-sweep(as.matrix(data_abundance[,column_names_cmp[["rt"]]]), 1, rt_median)
+
+
+dt_fr<-data.frame(data_abundance[,column_names_cmp[["rt"]]],dev=rt_dev[,2])
+
+dt_fr<-reshape2::melt(dt_fr,measure.vars=c(column_names_cmp[["rt"]]))
+
+colnames(dt_fr)[colnames(dt_fr)=="variable"]<-"file_name"
+levels(dt_fr[,"file_name"])<-gsub("^rt_",replacement = "",levels(dt_fr[,"file_name"]))
+dt_fr<-merge.data.frame(dt_fr,data_exp_design,by="file_name")
+
+
+
+plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)
+  +theme_classic()+xlab("Retention time")+ylab("Deviation"))
+
+knitr::asis_output("
+
+This is showing the distribution of RT deviation
+"
+)
+
+rt_median<-apply((data_abundance[,column_names_cmp[["rt"]]]),
+      1,median,na.rm=TRUE)
+
+rt_dev<-sweep(as.matrix(data_abundance[,column_names_cmp[["rt"]]]), 1, rt_median)
+
+rt_hist<-data.frame(x=as.vector(rt_dev))
+
+plotly::ggplotly(ggplot(data = rt_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("RT"))
+
+
+knitr::asis_output("
+
+#### mz
+"
+)
+
+
+mz_median<-apply((data_abundance[,column_names_cmp[["mz"]]]),
+      1,median,na.rm=TRUE)
+
+mz_dev<-sweep(as.matrix(data_abundance[,column_names_cmp[["mz"]]]), 1, mz_median)
+mz_dev<-sweep(mz_dev, MARGIN = 1,FUN = "/", mz_median)*1000000
+  
+dt_fr<-data.frame(data_abundance[,column_names_cmp[["mz"]]],dev=mz_dev[,2])
+
+dt_fr<-reshape2::melt(dt_fr,measure.vars=c(column_names_cmp[["mz"]]))
+
+colnames(dt_fr)[colnames(dt_fr)=="variable"]<-"file_name"
+levels(dt_fr[,"file_name"])<-gsub("^mz_",replacement = "",levels(dt_fr[,"file_name"]))
+dt_fr<-merge.data.frame(dt_fr,data_exp_design,by="file_name")
+
+
+plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)
+  +theme_classic()+xlab("m/z")+ylab("Deviation"))
+
+knitr::asis_output("
+
+This is showing the distribution of m/z deviation
+"
+)
+
+mz_hist<-data.frame(x=as.vector(mz_dev))
+
+plotly::ggplotly(ggplot(data = mz_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("ppm"))
+
+
+knitr::asis_output("
+### mz deviation of individual metabolites
+
+This is showing the distribution of m/z deviation (ppm) of each matched metabolite
+"
+)
+
+
+for(i in 1:nrow(data_abundance))
+{
+  
+  data_points<-data_abundance[i,column_names_cmp[["mz"]]]
+  met_id<-data_abundance[i,"Met_ID"]
+  id_tmp<-data_identification[data_identification[,"Met_ID"]==met_id,,drop=FALSE]
+  con_mz<-data_abundance[i,"mz_cf"]
+  for(j in 1:nrow(id_tmp))
+  {
+    theo_mass<-as.numeric(id_tmp[j,"mz"])
+    data_points_def<-data_points-theo_mass
+  data_points_def<-(data_points_def/theo_mass)*1000000
+    
+  con_dev<-((con_mz-theo_mass)/theo_mass)*1000000
+  
+  metabo_names <- paste("ID: ",met_id, " Name: ",
+                          paste(id_tmp[j,params$id_name],sep="/"),
+                          "Consensus mass dev ppm: ",con_dev)
+  
+  
+  
+  plot_point_data<-data.frame(data_exp_design,points=(as.numeric(data_points_def)))
+  
+  (plotly::ggplotly(ggplot(data = plot_point_data,aes_string(x="file_name",
+                                                          y="points",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="points",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("ppm error")+
+    theme(axis.text.x = show_text)+ggtitle(metabo_names)))
+  
+  }
+}
+
+
+if(params$id_check_rt==TRUE)
+{
+  
+  knitr::asis_output("
+### RT deviation of individual metabolites
+
+This is showing the distribution of RT deviation of each matched metabolite
+"
+)
+
+for(i in 1:nrow(data_abundance))
+{
+  
+  data_points<-data_abundance[i,column_names_cmp[["rt"]]]
+  met_id<-data_abundance[i,"Met_ID"]
+  id_tmp<-data_identification[data_identification[,"Met_ID"]==met_id,,drop=FALSE]
+  con_rt<-data_abundance[i,"rt_cf"]
+  for(j in 1:nrow(id_tmp))
+  {
+    theo_rt<-as.numeric(id_tmp[j,params$id_rt])
+    data_points_def<-data_points-theo_rt
+  
+  con_dev<-(con_rt-theo_rt)
+  metabo_names <- paste("ID: ",met_id, " Name: ",
+                          paste(id_tmp[j,params$id_name],sep="/"),
+                          "Consensus mass dev ppm: ",con_dev)
+  plot_point_data<-data.frame(data_exp_design,points=(as.numeric(data_points_def)))
+  
+  (plotly::ggplotly(ggplot(data = plot_point_data,aes_string(x="file_name",
+                                                          y="points",color=params$color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="points",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("RT dev")+
+    theme(axis.text.x = show_text)+ggtitle(metabo_names)))
+  
+  }
+}
+}
+
+```
+
+
+
+
+

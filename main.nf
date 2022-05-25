@@ -123,8 +123,15 @@ if(params.need_linking==true)
 if(params.need_identification==true)
 {
   Channel.fromPath(params.identification_input,checkIfExists: true)
-.set { identification_input }
+.into { identification_input;identification_input_qc }
 }
+
+if(params.need_qc==true)
+{
+  Channel.fromPath(params.qc_file,checkIfExists: true)
+.set { experimental_design }
+}
+
 
 // Check AWS batch settings
 if (workflow.profile.contains('awsbatch')) {
@@ -140,7 +147,7 @@ if (workflow.profile.contains('awsbatch')) {
 // Stage config files
 ch_output_docs = file("$projectDir/docs/output.md", checkIfExists: true)
 ch_output_docs_images = file("$projectDir/docs/images/", checkIfExists: true)
-
+ch_output_qc_rmd = channel.fromPath("$projectDir/assets/qc.Rmd", checkIfExists: true)
 
 
 ////////////////////////////////////////////////////
@@ -630,6 +637,42 @@ qc_input=feature_identification_input
     }
 
      """
+   }
+
+
+
+   if(params.need_qc==true)
+   {
+
+     process process_qc_report  {
+       label 'r'
+       //label 'process_low'
+       tag "$consensusXML - $key"
+       publishDir "${params.outdir}/process_qc_report", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+       stageInMode 'copy'
+       input:
+       set val(key), file(consensusXML) from sum_calc
+       each file(rmd_file) from ch_output_qc_rmd
+       each file(exp_des) from experimental_design
+       each file(id_in) from identification_input_qc
+       output:
+       set val(key), file("output_${key}/qc.html") into out
+
+       """
+       mkdir "output_${key}"
+       #$consensusXML
+       #$rmd_file
+       #Rscript -e "rmarkdown::render('example.Rmd',params=list(args = myarg))"
+
+       Rscript -e \\
+"rmarkdown::render('$rmd_file',output_file='qc.html',params=list(input_abundance='${consensusXML[1]}',
+input_id='${consensusXML[0]}',input_exp_design='$exp_des',input_internal_standards='$id_in',id_name='$params.identification_name_column',
+id_rt='$params.identification_rt_column',id_use_rt=as.logical('$params.identification_use_rt'),
+id_mz='$params.identification_mz_column',id_check_rt='$params.identification_use_rt',color_by='$params.covariate_qc'))"
+cp qc.html output_${key}/qc.html
+
+       """
+     }
    }
  }
 

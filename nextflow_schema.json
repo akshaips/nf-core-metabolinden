@@ -338,7 +338,26 @@
         },
         "internal_database_ppm_tolerance": {
             "type": "integer",
-            "default": 5
+            "default": 5,
+            "description": "ppm error for matching standards with features"
+        },
+        "need_qc": {
+            "type": "boolean",
+            "description": "If set, the pipeline will perform quality control of the data"
+        },
+        "identification_name_column": {
+            "type": "string",
+            "default": "Compound",
+            "description": "Name of the column showing actual name of the metabolite"
+        },
+        "covariate_qc": {
+            "type": "string",
+            "default": "batch2",
+            "description": "Covariate for colouring the results"
+        },
+        "qc_file": {
+            "type": "string",
+            "description": "If need_qc is true, this file must be an experimental design file that contains at least two columns: \"file_name\" and \"runorder\". The file name must be the name of the sample files (without extension) and run order must be number showing in which order samples have been run"
         }
     }
 }
