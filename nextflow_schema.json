@@ -357,7 +357,7 @@
         },
         "qc_file": {
             "type": "string",
-            "description": "If need_qc is true, this file must be an experimental design file that contains at least two columns: \"file_name\" and \"runorder\". The file name must be the name of the sample files (without extension) and run order must be number showing in which order samples have been run"
+            "description": "If need_qc is true, this file must be an experimental design file (tab separated) that contains at least two columns: \"file_name\" and \"runorder\". The file name must be the name of the sample files (without extension) and run order must be number showing in which order samples have been run"
         }
     }
 }

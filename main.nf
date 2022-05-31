@@ -668,7 +668,8 @@ qc_input=feature_identification_input
 "rmarkdown::render('$rmd_file',output_file='qc.html',params=list(input_abundance='${consensusXML[1]}',
 input_id='${consensusXML[0]}',input_exp_design='$exp_des',input_internal_standards='$id_in',id_name='$params.identification_name_column',
 id_rt='$params.identification_rt_column',id_use_rt=as.logical('$params.identification_use_rt'),
-id_mz='$params.identification_mz_column',id_check_rt='$params.identification_use_rt',color_by='$params.covariate_qc'))"
+id_mz='$params.identification_mz_column',id_check_rt='$params.identification_use_rt',color_by='$params.covariate_qc',
+interactive=as.logical('$params.interactive_plot')))"
 cp qc.html output_${key}/qc.html
 
        """

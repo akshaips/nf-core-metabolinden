@@ -13,6 +13,7 @@ params:
   id_convert_rt_to_seconds: 
   id_use_rt: 
   color_by:
+  interactive:
 editor_options: 
   chunk_output_type: console
 ---
@@ -41,7 +42,16 @@ print_qc_standards <- !is.null(params$input_internal_standards) & nrow(internal_
 if(!all(c("file_name","runorder")%in%colnames(data_exp_design)))
   stop("The experimental design file must at least contain file_name and runorder!")
 
+if(!params$color_by%in%colnames(internal_standards))
+{
+ 
+  color_by<-NULL
+}else{
+  color_by=params$color_by
+}
 
+  
+  
 data_exp_design <- data_exp_design[order(data_exp_design[,"runorder"]),]
 
 column_names_cmp <- lapply(c("rt","intensity","charge","width","mz"),function(x){paste(x,data_exp_design[,"file_name"],sep="_")})
@@ -53,6 +63,7 @@ if(!all(sapply(column_names_cmp,function(x){all(x%in%colnames(data_abundance))})
        unlist(sapply(column_names_cmp,function(x){x[!x%in%colnames(data_abundance)]})),replacement = "")
   stop("The file names in the experimental design file must match the raw data (this is case sensitive)! The names must not contain the file extension!"," check:", paste(unique(incor_names),collapse =" "))
 }
+
 
 
 
@@ -78,8 +89,16 @@ plot_missing_data<-data.frame(data_exp_design,missing_data=missing_data)
 
 plot_missing_data[,"file_name"]<-factor(plot_missing_data[,"file_name"],levels = plot_missing_data[,"file_name"])
 
-plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="missing_data",color=params$color_by))+geom_point()+
+if(params$interactive)
+{
+  plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="missing_data",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="runorder",y="missing_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Missing value percentage")+theme(axis.text.x = show_text)+ylim(0,100))
+
+}else{
+ (ggplot(data = plot_missing_data,aes_string(x="file_name",y="missing_data",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="missing_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Missing value percentage")+theme(axis.text.x = show_text)+ylim(0,100))
+}
+
 
 ```
 
@@ -95,10 +114,14 @@ tic_data<-log2(missing_data)
 plot_missing_data<-data.frame(data_exp_design,tic_data=tic_data)
 
 plot_missing_data[,"file_name"]<-factor(plot_missing_data[,"file_name"],levels = plot_missing_data[,"file_name"])
-
-plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="tic_data",color=params$color_by))+geom_point()+
+if(params$interactive)
+{
+plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="tic_data",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="runorder",y="tic_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Log2 of TIC")+theme(axis.text.x = show_text))
-
+}else{
+  ggplot(data = plot_missing_data,aes_string(x="file_name",y="tic_data",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="tic_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Log2 of TIC")+theme(axis.text.x = show_text)
+}
 ```
 
 ### CV across the run order
@@ -116,12 +139,18 @@ This plots shows the CV over the runorder. The dashed line shows the median of C
 hist_data<-data.frame(x=apply((data_abundance[,column_names_cmp[["intensity"]]]),
       1,CV))
 
-
+if(params$interactive)
+{
 plotly::ggplotly(ggplot(data = hist_data,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
  geom_density(alpha=.2, fill="blue")+
    geom_vline(aes(xintercept=median(hist_data$x,na.rm = T)),
             color="blue", linetype="dashed", size=1) +theme_classic()+xlab("CV"))
-
+}else{
+  ggplot(data = hist_data,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue")+
+   geom_vline(aes(xintercept=median(hist_data$x,na.rm = T)),
+            color="blue", linetype="dashed", size=1) +theme_classic()+xlab("CV")
+}
 ```
 
 
@@ -151,11 +180,15 @@ levels(dt_fr[,"file_name"])<-gsub("^rt_",replacement = "",levels(dt_fr[,"file_na
 dt_fr<-merge.data.frame(dt_fr,data_exp_design,by="file_name")
 
 
-
-plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=params$color_by))+geom_point()+
+if(params$interactive)
+{
+plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)
   +theme_classic()+xlab("m/z")+ylab("Deviation"))
-
+}else{
+  ggplot(data = dt_fr,aes_string(x="value",y="dev",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)+theme_classic()+xlab("m/z")+ylab("Deviation")
+}
 
 ```
 
@@ -172,9 +205,14 @@ rt_median<-apply((data_abundance[,column_names_cmp[["rt"]]]),
 rt_dev<-sweep(as.matrix(data_abundance[,column_names_cmp[["rt"]]]), 1, rt_median)
 
 rt_hist<-data.frame(x=as.vector(rt_dev))
-
+if(params$interactive)
+{
 plotly::ggplotly(ggplot(data = rt_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
  geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("RT"))
+}else{
+  ggplot(data = rt_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("RT")
+}
 ```
 
 #### mz
@@ -199,24 +237,33 @@ colnames(dt_fr)[colnames(dt_fr)=="variable"]<-"file_name"
 levels(dt_fr[,"file_name"])<-gsub("^mz_",replacement = "",levels(dt_fr[,"file_name"]))
 dt_fr<-merge.data.frame(dt_fr,data_exp_design,by="file_name")
 
-
-plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=params$color_by))+geom_point()+
+if(params$interactive)
+{
+plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)
   +theme_classic()+xlab("m/z")+ylab("Deviation (ppm)"))
-
+}else{
+  ggplot(data = dt_fr,aes_string(x="value",y="dev",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)+theme_classic()+xlab("m/z")+ylab("Deviation (ppm)")
+}
 
 ```
 
-This is showing the distribution of RT deviation
+This is showing the distribution of m/z deviation (ppm)
 
 
 ```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
 
 
 mz_hist<-data.frame(x=as.vector(mz_dev))
-
+if(params$interactive)
+{
 plotly::ggplotly(ggplot(data = mz_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
  geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("Deviation (ppm)"))
+}else{
+  ggplot(data = mz_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("Deviation (ppm)")
+}
 ```
 
 
@@ -224,13 +271,15 @@ plotly::ggplotly(ggplot(data = mz_hist,aes_string(x="x"))+geom_histogram(aes(y=.
 
 ```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
 
-charge_data<-apply(data_abundance[,column_names_cmp[["charge"]]],2,function(x){(table(x)/length(x))*100})
-
-all_charges<-sort(unique(unlist(sapply(charge_data,names))))
-all_charges_U<-sort(unique(unlist(sapply(charge_data,names))))
+#charge_data<-apply(data_abundance[,column_names_cmp[["charge"]]],2,function(x){(table(x)/length(x))*100})
+ charge_data<-lapply(split(t(data_abundance[,column_names_cmp[["charge"]]]),seq(NROW(t(data_abundance[,column_names_cmp[["charge"]]])))),
+                     function(x){(table(as.numeric(x))/length(x))*100})
+names(charge_data)<-colnames(data_abundance[,column_names_cmp[["charge"]]])
+all_charges<-sort(unique(as.vector(unlist(sapply(charge_data,names)))))
+all_charges_U<-sort(unique(as.vector(unlist(sapply(charge_data,names)))))
 all_charges<-data.frame(sample=column_names_cmp[["charge"]],
                         charge=rep(all_charges,each=length(column_names_cmp[["charge"]])),count_qc=NA,
-                        do.call(rbind, replicate(length(column_names_cmp[["charge"]]), data_exp_design, simplify=FALSE)))
+                        do.call(rbind, replicate(length(all_charges), data_exp_design, simplify=FALSE)))
 
 
 
@@ -248,11 +297,19 @@ all_charges$sample<-factor(all_charges$sample,levels = column_names_cmp[["charge
 
 levels(all_charges$sample)<-gsub("charge_",all_charges$sample,replacement = "")
 
-plotly::ggplotly(ggplot(data=all_charges, aes_string(x="sample", y="count_qc",color=params$color_by)) +  geom_point()+
+if(params$interactive)
+{
+plotly::ggplotly(ggplot(data=all_charges, aes_string(x="sample", y="count_qc",color=color_by)) +  geom_point()+
      geom_smooth(aes_string(x="sample",y="count_qc",group="charge"),se = FALSE)+
 facet_wrap(~charge,scales = "free")+
   theme_classic()+xlab("")+ylab("Percentage of charge")+theme(axis.text.x = show_text))
-
+}else{
+  
+  ggplot(data=all_charges, aes_string(x="sample", y="count_qc",color=color_by)) +  geom_point()+
+     geom_smooth(aes_string(x="sample",y="count_qc",group="charge"),se = FALSE)+
+facet_wrap(~charge,scales = "free")+
+  theme_classic()+xlab("")+ylab("Percentage of charge")+theme(axis.text.x = show_text)
+}
 
 ```
 
@@ -262,16 +319,20 @@ This plot shows the percentage of features that have consistent charge state acr
 
 ```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE}
 
-charge_data<-apply(data_abundance[,column_names_cmp[["charge"]]],1,function(x){(table(x)/length(x))*100})
 
-
-all_charges<-sort(unique(unlist(sapply(charge_data,function(x){names(x[x==100])}))))
+charge_data<-lapply(split((data_abundance[,column_names_cmp[["charge"]]]),seq(NROW((data_abundance[,column_names_cmp[["charge"]]])))),
+                     function(x){(table(as.numeric(x))/length(x))*100})
 
 all_charges<-reshape2::melt(table(unlist(sapply(charge_data,function(x){names(x[x==100])})))*100/nrow(data_abundance))
 
+if(params$interactive)
+{
 plotly::ggplotly(ggplot(data=all_charges, aes(x="charge", y=value,fill=as.character(Var1))) +  geom_bar(stat = "identity",position="stack")+
   theme_classic()+xlab("")+ylab("Percentage of charge")+theme(legend.title=element_blank())+ylim(0,100))
-
+}else{
+  ggplot(data=all_charges, aes(x="charge", y=value,fill=as.character(Var1))) +  geom_bar(stat = "identity",position="stack")+
+  theme_classic()+xlab("")+ylab("Percentage of charge")+theme(legend.title=element_blank())+ylim(0,100)
+}
 
 
 
@@ -280,10 +341,17 @@ plotly::ggplotly(ggplot(data=all_charges, aes(x="charge", y=value,fill=as.charac
 
 ```{r, echo=FALSE,warning=FALSE,error=FALSE,message=FALSE,include=print_qc_standards,eval=print_qc_standards}
 
- knitr::asis_output("## Internal standard-based QC
+ knitr::asis_output("
  
-                    ### Identification
+ ## Internal standard-based QC
+ 
                     ")
+
+ knitr::asis_output("
+ 
+ ### Identification
+                    ")
+                    
 # what has been identified!
 unique_ids_database<-NA
 unique_ids_exp <- NA
@@ -300,18 +368,27 @@ if(params$id_use_rt)
 
 }
 
- knitr::asis_output( paste( "The total number of identified metabolites is ",length(intersect(unique_ids_database,unique_ids_exp)), " out of ",length(unique_ids_database),". In addition, ",length(unique(data_identification[duplicated(data_identification[,"Met_ID"]),"Met_ID"]))," metabolites were not assigned to a unique feature.
-Finally, ", length(unique(ids_exp[duplicated(ids_exp)]))," metabolites were assigned to multiple features.")) 
+ knitr::asis_output( paste( "\nThe total number of identified metabolites is ",length(intersect(unique_ids_database,unique_ids_exp)), " out of ",length(unique_ids_database),". In addition, ",length(unique(data_identification[duplicated(data_identification[,"Met_ID"]),"Met_ID"]))," metabolites were not assigned to a unique feature.
+Finally, ", length(unique(ids_exp[duplicated(ids_exp)]))," metabolites were assigned to multiple features.\n")) 
  
 
-knitr::asis_output("### QC based on Identification")
+knitr::asis_output("
+
+### QC based on Identification
+")
 
 ## limit the data to the identified one!
 
 data_abundance<-data_abundance[data_abundance[,"Met_ID"]%in%data_identification[,"Met_ID"],,drop=FALSE]
 
-knitr::asis_output("### Missing values")
-knitr::asis_output("Percentage of missing values compared to the total number of features find in the *entire* dataset")
+knitr::asis_output("
+### Missing values
+                   ")
+knitr::asis_output("
+
+Percentage of missing values compared to the total number of features find in the *entire* dataset
+                   
+                   ")
 
 missing_data<-apply(is.na(data_abundance[,column_names_cmp[["intensity"]]]),
       2,sum)/nrow(data_abundance)
@@ -319,15 +396,22 @@ missing_data<-missing_data*100
 plot_missing_data<-data.frame(data_exp_design,missing_data=missing_data)
 
 plot_missing_data[,"file_name"]<-factor(plot_missing_data[,"file_name"],levels = plot_missing_data[,"file_name"])
-
-plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="missing_data",color=params$color_by))+geom_point()+
+if(params$interactive)
+{
+plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="missing_data",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="runorder",y="missing_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Missing value percentage")+theme(axis.text.x = show_text)+ylim(0,100))
-
+}else{
+print(  ggplot(data = plot_missing_data,aes_string(x="file_name",y="missing_data",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="missing_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Missing value percentage")+theme(axis.text.x = show_text)+ylim(0,100))
+}
 ###
 knitr::asis_output(
 "### TIC across the run order
+")
 
-This plots shows the $log_2$ of TIC over the runorder")
+knitr::asis_output("
+This plots shows the $log_2$ of TIC over the runorder
+                   ")
 
 tic_data<-apply((data_abundance[,column_names_cmp[["intensity"]]]),
       2,sum,na.rm=TRUE)
@@ -335,10 +419,14 @@ tic_data<-log2(missing_data)
 plot_missing_data<-data.frame(data_exp_design,tic_data=tic_data)
 
 plot_missing_data[,"file_name"]<-factor(plot_missing_data[,"file_name"],levels = plot_missing_data[,"file_name"])
-
-plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="tic_data",color=params$color_by))+geom_point()+
+if(params$interactive)
+{
+plotly::ggplotly(ggplot(data = plot_missing_data,aes_string(x="file_name",y="tic_data",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="runorder",y="tic_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Log2 of TIC")+theme(axis.text.x = show_text))
-
+}else{
+  ggplot(data = plot_missing_data,aes_string(x="file_name",y="tic_data",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="tic_data",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Log2 of TIC")+theme(axis.text.x = show_text)
+}
 knitr::asis_output("
 ### CV across the run order
 
@@ -355,12 +443,18 @@ This plots shows the CV over the runorder. The dashed line shows the median of C
 hist_data<-data.frame(x=apply((data_abundance[,column_names_cmp[["intensity"]]]),
       1,CV))
 
-
+if(params$interactive)
+{
 plotly::ggplotly(ggplot(data = hist_data,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
  geom_density(alpha=.2, fill="blue")+
    geom_vline(aes(xintercept=median(hist_data$x,na.rm = T)),
             color="blue", linetype="dashed", size=1) +theme_classic()+xlab("CV"))
-
+}else{
+  ggplot(data = hist_data,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue")+
+   geom_vline(aes(xintercept=median(hist_data$x,na.rm = T)),
+            color="blue", linetype="dashed", size=1) +theme_classic()+xlab("CV")
+}
 knitr::asis_output("
 ### CV individual standars
 
@@ -377,11 +471,18 @@ for(i in 1:nrow(hist_data))
 plot_point_data<-data.frame(data_exp_design,points=log2(as.numeric(data_points)))
 
 plot_point_data[,"file_name"]<-factor(plot_point_data[,"file_name"],levels = plot_point_data[,"file_name"])
-
+if(params$interactive)
+{
 (plotly::ggplotly(ggplot(data = plot_point_data,aes_string(x="file_name",
-                                                          y="points",color=params$color_by))+geom_point()+
+                                                          y="points",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="runorder",y="points",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Log2 intensity")+
     theme(axis.text.x = show_text)+ggtitle(metabo_names)))
+}else{
+  ggplot(data = plot_point_data,aes_string(x="file_name",
+                                                          y="points",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="points",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("Log2 intensity")+
+    theme(axis.text.x = show_text)+ggtitle(metabo_names)
+}
 
 }
 
@@ -409,11 +510,15 @@ levels(dt_fr[,"file_name"])<-gsub("^rt_",replacement = "",levels(dt_fr[,"file_na
 dt_fr<-merge.data.frame(dt_fr,data_exp_design,by="file_name")
 
 
-
-plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=params$color_by))+geom_point()+
+if(params$interactive)
+{
+plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)
   +theme_classic()+xlab("Retention time")+ylab("Deviation"))
-
+}else{
+  ggplot(data = dt_fr,aes_string(x="value",y="dev",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)+theme_classic()+xlab("Retention time")+ylab("Deviation")
+}
 knitr::asis_output("
 
 This is showing the distribution of RT deviation
@@ -426,14 +531,20 @@ rt_median<-apply((data_abundance[,column_names_cmp[["rt"]]]),
 rt_dev<-sweep(as.matrix(data_abundance[,column_names_cmp[["rt"]]]), 1, rt_median)
 
 rt_hist<-data.frame(x=as.vector(rt_dev))
-
+if(params$interactive)
+{
 plotly::ggplotly(ggplot(data = rt_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
  geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("RT"))
-
+}else{
+  ggplot(data = rt_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("RT")
+  
+}
 
 knitr::asis_output("
 
 #### mz
+
 "
 )
 
@@ -452,11 +563,16 @@ colnames(dt_fr)[colnames(dt_fr)=="variable"]<-"file_name"
 levels(dt_fr[,"file_name"])<-gsub("^mz_",replacement = "",levels(dt_fr[,"file_name"]))
 dt_fr<-merge.data.frame(dt_fr,data_exp_design,by="file_name")
 
-
-plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=params$color_by))+geom_point()+
+if(params$interactive)
+{
+plotly::ggplotly(ggplot(data = dt_fr,aes_string(x="value",y="dev",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)
   +theme_classic()+xlab("m/z")+ylab("Deviation"))
-
+}else{
+  
+  ggplot(data = dt_fr,aes_string(x="value",y="dev",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="value",y="dev",group="file_name"),alpha=0.3,se = FALSE)+theme_classic()+xlab("m/z")+ylab("ppm error")
+}
 knitr::asis_output("
 
 This is showing the distribution of m/z deviation
@@ -464,10 +580,14 @@ This is showing the distribution of m/z deviation
 )
 
 mz_hist<-data.frame(x=as.vector(mz_dev))
-
+if(params$interactive)
+{
 plotly::ggplotly(ggplot(data = mz_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
- geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("ppm"))
-
+ geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("ppm error"))
+}else{
+  ggplot(data = mz_hist,aes_string(x="x"))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="blue") +theme_classic()+xlab("ppm error")
+}
 
 knitr::asis_output("
 ### mz deviation of individual metabolites
@@ -499,11 +619,18 @@ for(i in 1:nrow(data_abundance))
   
   
   plot_point_data<-data.frame(data_exp_design,points=(as.numeric(data_points_def)))
-  
+  if(params$interactive)
+{
   (plotly::ggplotly(ggplot(data = plot_point_data,aes_string(x="file_name",
-                                                          y="points",color=params$color_by))+geom_point()+
+                                                          y="points",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="runorder",y="points",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("ppm error")+
     theme(axis.text.x = show_text)+ggtitle(metabo_names)))
+  }else{
+ print(  ggplot(data = plot_point_data,aes_string(x="file_name",
+                                                          y="points",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="points",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("ppm error")+
+    theme(axis.text.x = show_text)+ggtitle(metabo_names))
+  }
   
   }
 }
@@ -536,11 +663,18 @@ for(i in 1:nrow(data_abundance))
                           paste(id_tmp[j,params$id_name],sep="/"),
                           "Consensus mass dev ppm: ",con_dev)
   plot_point_data<-data.frame(data_exp_design,points=(as.numeric(data_points_def)))
-  
+    if(params$interactive)
+{
   (plotly::ggplotly(ggplot(data = plot_point_data,aes_string(x="file_name",
-                                                          y="points",color=params$color_by))+geom_point()+
+                                                          y="points",color=color_by))+geom_point()+
   geom_smooth(aes_string(x="runorder",y="points",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("RT dev")+
     theme(axis.text.x = show_text)+ggtitle(metabo_names)))
+    }else{
+    print(  ggplot(data = plot_point_data,aes_string(x="file_name",
+                                                          y="points",color=color_by))+geom_point()+
+  geom_smooth(aes_string(x="runorder",y="points",color=NULL),alpha=0.3) +theme_classic()+xlab("")+ylab("RT dev")+
+    theme(axis.text.x = show_text)+ggtitle(metabo_names))
+    }
   
   }
 }
