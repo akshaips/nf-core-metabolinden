@@ -488,7 +488,7 @@ if(params.need_linking==true)
       def groups=[]
       def ids=[]
       def outfiles=[]
-      for(n:0..chunks.size()-1)
+      for(n in 0..chunks.size()-1)
       {
         vector_sizes.add(chunks[n].size())
         aa=["chunk"+(n+1)+"_chunkend_"+old_key]*chunks[n].size()
