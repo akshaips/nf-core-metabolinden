@@ -1,25 +1,8 @@
 #!/usr/bin/env nextflow
 /*
-nextflow main.nf --input '/Users/payam/wabi_projects/burman/QC_workflow/test_data/raw_data/*.mzML' \
---need_centroiding false \
---peak_picker_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/picker_params/*.ini' -profile docker \
---recalibration_masses /Users/payam/wabi_projects/burman/QC_workflow/test_data/lock_masses.csv \
---peak_recalibration_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/recal_params/*.ini' \
---need_recalibration true --publishDir_intermediate true -resume \
---feature_finder_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/finder_params/*.ini'
 
 
-nextflow main.nf --input '/Users/payam/wabi_projects/burman/QC_workflow/test_data/raw_data/*.mzML' --need_centroiding true --peak_picker_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/picker_params/*.ini' -profile docker --recalibration_masses /Users/payam/wabi_projects/burman/QC_workflow/test_data/lock_masses.csv --peak_recalibration_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/recal_params/*.ini' --need_recalibration false --publishDir_intermediate true -resume --feature_finder_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/finder_params/*.ini'
 
-nextflow main.nf --input '/Users/payam/wabi_projects/burman/QC_workflow/test_data/raw_data/*.mzML' \
---need_centroiding true --peak_picker_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/picker_params/*.ini' \
--profile docker --recalibration_masses /Users/payam/wabi_projects/burman/QC_workflow/test_data/lock_masses.csv \
---peak_recalibration_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/recal_params/*.ini' \
---need_recalibration true --publishDir_intermediate true -resume \
---feature_finder_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/finder_params/*.ini' \
---feature_alignment_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/align_params/*.ini' \
---feature_linker_param '/Users/payam/wabi_projects/burman/QC_workflow/test_data/linker/*.ini' \
---identification_input '/Users/payam/wabi_projects/burman/QC_workflow/test_data/IDs.tsv'
 ========================================================================================
                          nf-core/metabolinden
 ========================================================================================
@@ -47,11 +30,58 @@ if (params.help) {
 if (params.validate_params) {
     NfcoreSchema.validateParameters(params, json_schema, log)
 }
+////////////////////////////////////////////////////
+/* --     randomize files     -- */
+////////////////////////////////////////////////////
+
+def group_files( input,samples_in_chunks=2,randomize=false,seed=42){
+old_key=input[0]
+input=input[1]
+
+if(samples_in_chunks<=1 || samples_in_chunks>=input.size())
+{
+  step_wise_linking=false
+  return input
+}
+
+def range_of_vec = (0..input.size()-1).toList()
+if(randomize==true){
+  range_of_vec.shuffle(new Random(seed))
+}
+
+
+
+if((range_of_vec.size()%samples_in_chunks)<2)
+{
+  while((range_of_vec.size()%samples_in_chunks)<2)
+  {
+    samples_in_chunks = (samples_in_chunks+1)
+  }
+  println 'The minimum number of samples must be one. Adjusting samples_in_chunks to '+ (samples_in_chunks)
+
+
+}
+
+chunks=range_of_vec.collate(samples_in_chunks)
+def vector_sizes=[]
+groups=[]
+for(n:0..chunks.size()-1)
+{
+  vector_sizes.add(chunks[n].size())
+  aa=["chunk"+(n+1)+"_chunkend_"+old_key]*chunks[n].size()
+  for(i in chunks[n])
+  {
+    groups.add(["chunk"+(n+1)+old_key,old_key,file(input[i])])
+  }
+}
+return(groups)
+
+
+}
 
 ////////////////////////////////////////////////////
 /* --     Collect configuration parameters     -- */
 ////////////////////////////////////////////////////
-
 Channel.fromPath(params.input,checkIfExists: true)
 .map{def key = "start"
 return tuple(key, it)}
@@ -70,6 +100,7 @@ Channel.fromPath(params.peak_picker_param,checkIfExists: true)
 /*
 * Create a channel for recalibration parameters
 */
+
 if(params.need_recalibration==true)
 {
 Channel.fromPath(params.peak_recalibration_param,checkIfExists: true)
@@ -114,6 +145,16 @@ if(params.need_linking==true)
 {
   Channel.fromPath(params.feature_linker_param,checkIfExists: true)
 .set { feature_linker_param }
+
+if(params.step_wise_linking==true)
+if(params.use_same_setting_for_second_linking==false)
+{
+  Channel.fromPath(params.feature_linker_param2,checkIfExists: true)
+  .set { feature_linker_param2 }
+}
+
+
+
 }
 
 /*
@@ -131,6 +172,10 @@ if(params.need_qc==true)
   Channel.fromPath(params.qc_file,checkIfExists: true)
 .set { experimental_design }
 }
+
+/*
+* Create a channel for feature linker parameters
+*/
 
 
 // Check AWS batch settings
@@ -373,26 +418,174 @@ feature_linker_input_tmp.set{feature_linker_input}
 
 if(params.need_linking==true)
 {
-  process process_masstrace_linker_openms  {
+  if(params.step_wise_linking==false)
+  {
+    process process_masstrace_linker_openms  {
+      label 'openms'
+      //label 'process_low'
+      tag "$setting_file"
+      publishDir "${params.outdir}/process_masstrace_linker_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+      input:
+      set val(key), file(mzMLFile) from feature_linker_input
+      each file(setting_file) from feature_linker_param
+
+      output:
+      set val("${key}_${setting_file.baseName}"), file("output_${key}_${setting_file.baseName}/*.*") into feature_identification_input
+
+      script:
+      def inputs_aggregated = mzMLFile.collect{ "$it" }.join(" ")
+      """
+      mkdir "output_${key}_${setting_file.baseName}"
+      FeatureLinkerUnlabeledQT -in $inputs_aggregated -out "output_${key}_${setting_file.baseName}/linked_features.consensusXML" -ini $setting_file
+      """
+    }
+  }else{
+
+    feature_linker_input.set{chunker}
+
+
+    process group_files_chunks {
+  //label 'process_low'
+      input:
+      set val(key), file(mzMLFile) from chunker
+
+      output:
+      set val(a), val(key), file(otfile) into chunked_output
+
+
+      script:
+      def old_key=key
+      def input = mzMLFile.collect()
+
+      def samples_in_chunks=params.number_of_files
+      if(samples_in_chunks<=1 || samples_in_chunks>=input.size())
+      {
+        step_wise_linking=false
+        return input
+      }
+
+      def range_of_vec = (0..input.size()-1).toList()
+      if(params.randomize_files==true){
+        range_of_vec.shuffle(new Random(params.seed_for_linking))
+      }
+
+
+
+      if((range_of_vec.size()%samples_in_chunks)<2)
+      {
+        while((range_of_vec.size()%samples_in_chunks)<2)
+        {
+          samples_in_chunks = (samples_in_chunks+1)
+        }
+        println 'The minimum number of samples must be one. Adjusting samples_in_chunks to '+ (samples_in_chunks)
+
+
+      }
+
+      def chunks=range_of_vec.collate(samples_in_chunks)
+      def vector_sizes=[]
+      def groups=[]
+      def ids=[]
+      def outfiles=[]
+      for(n:0..chunks.size()-1)
+      {
+        vector_sizes.add(chunks[n].size())
+        aa=["chunk"+(n+1)+"_chunkend_"+old_key]*chunks[n].size()
+        for(i in chunks[n])
+        {
+          ids.add("chunk"+(n+1)+old_key)
+          outfiles.add(input[i])
+        }
+      }
+      a=ids
+      otfile=outfiles
+
+      """
+      echo "dummy"
+      """
+    }
+
+
+
+    chunked_output
+         .transpose().groupTuple().set{chunked_input_for_linking}
+
+
+    process process_masstrace_linker_openms_chunks  {
+      label 'openms'
+      //label 'process_low'
+      tag "${key.unique().join("")}"
+      publishDir "${params.outdir}/process_masstrace_linker_openms_chunks", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+      input:
+      set val(key_group),val(key), file(mzMLFile) from chunked_input_for_linking
+      each file(setting_file) from feature_linker_param
+
+      output:
+      set val("${key.unique().join("")}_${setting_file.baseName}"), file("output_${key_group}_${setting_file.baseName}/*.*"),file("setting_${key_group}_${setting_file.baseName}/*.ini") into feature_linking2_input_tmp
+
+      script:
+      def inputs_aggregated = mzMLFile.collect{ "$it" }.join(" ")
+      """
+      mkdir "output_${key_group}_${setting_file.baseName}"
+      mkdir "setting_${key_group}_${setting_file.baseName}"
+      FeatureLinkerUnlabeledQT -in $inputs_aggregated -out "output_${key_group}_${setting_file.baseName}/${key_group}_linked_features.consensusXML" -ini $setting_file
+      cp ${setting_file} "setting_${key_group}_${setting_file.baseName}"
+
+      """
+    }
+  feature_linking2_input_tmp.groupTuple(by:0).map{a,b,c->tuple(a,b,c[0])}.set{feature_linking2_input}
+
+if(params.use_same_setting_for_second_linking==false)
+{
+  process process_masstrace_linker_openms_chunks_join  {
     label 'openms'
     //label 'process_low'
-    tag "$setting_file"
-    publishDir "${params.outdir}/process_masstrace_linker_openms", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+    tag "$st_file"
+    publishDir "${params.outdir}/process_masstrace_linker_openms_chunks_join", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
 
     input:
-    set val(key), file(mzMLFile) from feature_linker_input
-    each file(setting_file) from feature_linker_param
+    set val(key), file(mzMLFile),file(st_file) from feature_linking2_input
+    each file(setting_file) from feature_linker_param2
 
     output:
-    set val("${key}_${setting_file.baseName}"), file("output_${key}_${setting_file.baseName}/*.*") into feature_identification_input
+    set val("${key}_${st_file.baseName}"), file("output_${key}_${st_file.baseName}/*.*") into feature_identification_input
 
     script:
     def inputs_aggregated = mzMLFile.collect{ "$it" }.join(" ")
     """
-    mkdir "output_${key}_${setting_file.baseName}"
-    FeatureLinkerUnlabeledQT -in $inputs_aggregated -out "output_${key}_${setting_file.baseName}/linked_features.consensusXML" -ini $setting_file
+    mkdir "output_${key}_${st_file.baseName}"
+    FeatureLinkerUnlabeledQT -in $inputs_aggregated -out "output_${key}_${st_file.baseName}/linked_features.consensusXML" -ini $setting_file -keep_subelements
     """
   }
+}else{
+  process process_masstrace_linker_openms_chunks_join_samesetting  {
+    label 'openms'
+    //label 'process_low'
+    tag "${st_file.baseName}"
+    publishDir "${params.outdir}/process_masstrace_linker_openms_chunks_join", mode: params.publish_dir_mode, enabled: params.publishDir_intermediate
+
+    input:
+    set val(key), file(mzMLFile),file(st_file) from feature_linking2_input
+
+    output:
+    set val("${key}_${st_file.baseName}"), file("output_${key}_${st_file.baseName}/*.*") into feature_identification_input
+
+    script:
+    def inputs_aggregated = mzMLFile.collect{ "$it" }.join(" ")
+    def setting = st_file.collect()
+
+    """
+    mkdir "output_${key}_${st_file.baseName}"
+    FeatureLinkerUnlabeledQT -in $inputs_aggregated -out "output_${key}_${st_file.baseName}/linked_features.consensusXML" -ini $st_file -keep_subelements
+    """
+  }
+}
+
+
+  }
+
 }else{
 
   feature_identification_input=feature_linker_input
@@ -565,7 +758,7 @@ qc_input=feature_identification_input
      set val(key), file(consensusXML) from output_formatting
 
      output:
-     set val(key), file("output_${key}/*.tsv") into sum_calc, test6
+     set val(key), file("output_${key}/*.tsv") into sum_calc
 
      """
      #!/usr/bin/env Rscript

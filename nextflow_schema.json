@@ -358,6 +358,35 @@
         "qc_file": {
             "type": "string",
             "description": "If need_qc is true, this file must be an experimental design file (tab separated) that contains at least two columns: \"file_name\" and \"runorder\". The file name must be the name of the sample files (without extension) and run order must be number showing in which order samples have been run"
+        },
+        "feature_linker_param2": {
+            "type": "string",
+            "default": "assets/parameters/FeatureLinkerUnlabeledQT.ini"
+        },
+        "mapper_param": {
+            "type": "string",
+            "default": "mapper.ini"
+        },
+        "interactive_plot": {
+            "type": "string"
+        },
+        "step_wise_linking": {
+            "type": "string"
+        },
+        "number_of_files": {
+            "type": "integer",
+            "default": 2
+        },
+        "randomize_files": {
+            "type": "string"
+        },
+        "seed_for_linking": {
+            "type": "integer",
+            "default": 10
+        },
+        "use_same_setting_for_second_linking": {
+            "type": "string",
+            "default": "true"
         }
     }
 }
