@@ -368,25 +368,27 @@
             "default": "mapper.ini"
         },
         "interactive_plot": {
-            "type": "string"
+            "type": "boolean"
         },
         "step_wise_linking": {
-            "type": "string"
+            "type": "boolean",
+            "default": false
         },
         "number_of_files": {
             "type": "integer",
             "default": 2
         },
         "randomize_files": {
-            "type": "string"
+            "type": "boolean",
+            "default": false
         },
         "seed_for_linking": {
             "type": "integer",
             "default": 10
         },
         "use_same_setting_for_second_linking": {
-            "type": "string",
-            "default": "true"
+            "type": "boolean",
+            "default": true
         }
     }
 }
