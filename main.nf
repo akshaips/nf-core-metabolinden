@@ -65,7 +65,7 @@ if((range_of_vec.size()%samples_in_chunks)<2)
 chunks=range_of_vec.collate(samples_in_chunks)
 def vector_sizes=[]
 groups=[]
-for(n:0..chunks.size()-1)
+for(n in 0..chunks.size()-1)
 {
   vector_sizes.add(chunks[n].size())
   aa=["chunk"+(n+1)+"_chunkend_"+old_key]*chunks[n].size()
